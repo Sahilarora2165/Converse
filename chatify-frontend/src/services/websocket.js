@@ -98,6 +98,7 @@ class WebSocketService {
         const body = message.body ? JSON.parse(message.body) : null;
         callback(body);
       } catch {
+        // If JSON parsing fails, pass the raw body to the callback
         callback(message.body);
       }
     });

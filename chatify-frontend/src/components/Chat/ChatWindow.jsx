@@ -19,7 +19,7 @@ const ChatWindow = ({ chatRoomId, onChatUpdated }) => {
   
   const [chatRoom, setChatRoom] = useState(null);
   const [messages, setMessages] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
   const messagesEndRef = useRef(null);
   const previousChatRoomIdRef = useRef(null);

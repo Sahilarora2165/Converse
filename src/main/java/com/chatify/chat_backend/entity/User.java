@@ -1,8 +1,10 @@
 package com.chatify.chat_backend.entity;
 
+import com.chatify.chat_backend.entity.enums.UserStatus;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.LocalDateTime;
 
@@ -26,7 +28,20 @@ public class User {
     @Column(nullable = false)
     private String password;
 
+    @Column(name = "profile_picture")
+    private String profilePicture;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private UserStatus status = UserStatus.OFFLINE;
+
+    @Column(name = "last_seen")
+    private LocalDateTime lastSeen;
+
     @CreationTimestamp
     @Column(updatable = false)
     private LocalDateTime createdAt;
+
+    @UpdateTimestamp
+    private LocalDateTime updatedAt;
 }

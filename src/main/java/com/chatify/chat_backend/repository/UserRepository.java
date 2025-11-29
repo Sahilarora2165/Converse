@@ -1,24 +1,30 @@
 package com.chatify.chat_backend.repository;
 
 import com.chatify.chat_backend.entity.User;
+import com.chatify.chat_backend.entity.enums.UserStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 @Repository
 public interface UserRepository extends JpaRepository<User,Long> {
 
-    // For LOGIN: Find a user by their email to verify password
     Optional<User> findByEmail(String email);
 
     Optional<User> findByUsername(String username);
 
-    // For REGISTRATION: Check if email is already taken (efficient exists check)
     Boolean existsByEmail(String email);
 
-    // For REGISTRATION: Check if username is already taken (if username must be unique)
     Boolean existsByUsername(String username);
 
+    @Query("SELECT u FROM User u WHERE LOWER(u.username) LIKE LOWER(CONCAT('%', :query, '%')) " +
+           "OR LOWER(u.email) LIKE LOWER(CONCAT('%', :query, '%'))")
+    List<User> searchUsers(@Param("query") String query);
+
+    List<User> findByStatus(UserStatus status);
 }
 

@@ -140,8 +140,8 @@ const ChatWindow = ({ chatRoomId, onChatUpdated }) => {
   useEffect(() => {
     if (!chatRoomId || loading || isSubscribed) return;
     
-    // Only subscribe after messages have been loaded
-    if (messages.length >= 0 && !isLoadingRef.current) {
+    // Only subscribe after messages have finished loading (loading is false and not in loading state)
+    if (!isLoadingRef.current) {
       subscribeToChatRoom(chatRoomId, handleNewMessage);
       setReadReceiptCallback(chatRoomId, handleReadReceipt);
       setIsSubscribed(true);
@@ -153,7 +153,7 @@ const ChatWindow = ({ chatRoomId, onChatUpdated }) => {
         setIsSubscribed(false);
       }
     };
-  }, [chatRoomId, loading, isSubscribed, messages.length, subscribeToChatRoom, unsubscribeFromChatRoom, handleNewMessage, handleReadReceipt, setReadReceiptCallback]);
+  }, [chatRoomId, loading, isSubscribed, subscribeToChatRoom, unsubscribeFromChatRoom, handleNewMessage, handleReadReceipt, setReadReceiptCallback]);
 
   // Re-subscribe when WebSocket reconnects
   useEffect(() => {

@@ -10,6 +10,7 @@ class WebSocketService {
     this.isConnecting = false;
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
+    this.maxBackoffMultiplier = 3;
     this.reconnectDelay = 3000;
     this.messageQueue = [];
     this.token = null;
@@ -120,7 +121,7 @@ class WebSocketService {
 
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
-      const delay = this.reconnectDelay * Math.min(this.reconnectAttempts, 3);
+      const delay = this.reconnectDelay * Math.min(this.reconnectAttempts, this.maxBackoffMultiplier);
       console.log(`Reconnecting... Attempt ${this.reconnectAttempts} in ${delay}ms`);
       
       setTimeout(() => {

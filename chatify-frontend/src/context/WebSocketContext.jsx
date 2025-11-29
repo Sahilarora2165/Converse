@@ -126,21 +126,16 @@ export const WebSocketProvider = ({ children }) => {
       if (token) {
         hasShownConnectionErrorRef.current = false;
         
-        // Listen for connection state changes
+        // Listen for connection state changes from the service
         const unsubscribeState = webSocketService.onConnectionStateChange((connected) => {
           setIsConnected(connected);
-          setIsConnecting(false);
+          setIsConnecting(webSocketService.isConnecting);
           
           if (connected) {
             hasShownConnectionErrorRef.current = false;
             // Re-subscribe to pending subscriptions after reconnection
             processPendingSubscriptions();
           }
-        });
-
-        // Use a microtask to set connecting state to avoid synchronous setState in effect
-        queueMicrotask(() => {
-          setIsConnecting(true);
         });
 
         webSocketService.connect(

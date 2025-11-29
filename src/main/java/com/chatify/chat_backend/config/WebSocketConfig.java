@@ -1,6 +1,7 @@
 package com.chatify.chat_backend.config;
 
 import com.chatify.chat_backend.security.JwtUtil;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
@@ -20,16 +21,17 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     private final JwtUtil jwtUtil;
 
+    @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:5173}")
+    private String allowedOrigins;
+
     public WebSocketConfig(JwtUtil jwtUtil){
         this.jwtUtil = jwtUtil;
     }
 
     @Override
-    // This method is called by spring at startup to register WebSocket / STOMP endpoints
     public void registerStompEndpoints(StompEndpointRegistry registry){
-        // This is the handshake URL where the HTTP request upgrades to a WebSocket connection.
         registry.addEndpoint("/ws")
-                .setAllowedOriginPatterns("*")
+                .setAllowedOrigins(allowedOrigins.split(","))
                 .withSockJS();
     }
 

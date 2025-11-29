@@ -104,12 +104,35 @@ public class FileStorageService {
         if (originalFileName != null && originalFileName.contains("..")) {
             throw new BadRequestException("Invalid file name");
         }
+
+        String extension = getFileExtension(originalFileName);
+        if (!isExtensionMatchingContentType(extension, contentType)) {
+            throw new BadRequestException("File extension does not match content type");
+        }
     }
 
     private String getFileExtension(String fileName) {
         if (fileName == null || !fileName.contains(".")) {
             return "";
         }
-        return fileName.substring(fileName.lastIndexOf("."));
+        String extension = fileName.substring(fileName.lastIndexOf(".")).toLowerCase();
+        if (!extension.matches("^\\.[a-z0-9]+$")) {
+            throw new BadRequestException("Invalid file extension");
+        }
+        return extension;
+    }
+
+    private boolean isExtensionMatchingContentType(String extension, String contentType) {
+        return switch (contentType) {
+            case "image/jpeg" -> extension.equals(".jpg") || extension.equals(".jpeg");
+            case "image/png" -> extension.equals(".png");
+            case "image/gif" -> extension.equals(".gif");
+            case "image/webp" -> extension.equals(".webp");
+            case "application/pdf" -> extension.equals(".pdf");
+            case "application/msword" -> extension.equals(".doc");
+            case "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> extension.equals(".docx");
+            case "text/plain" -> extension.equals(".txt");
+            default -> false;
+        };
     }
 }

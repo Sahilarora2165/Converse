@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { login as loginApi, logout as logoutApi, register as registerApi } from '../api/auth';
 import { getCurrentUser } from '../api/users';
 import toast from 'react-hot-toast';
@@ -19,6 +19,23 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
+  const logout = useCallback(async (showToast = true) => {
+    try {
+      await logoutApi();
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+      localStorage.removeItem('user');
+      setUser(null);
+      setIsAuthenticated(false);
+      if (showToast) {
+        toast.success('Logged out successfully');
+      }
+    }
+  }, []);
+
   useEffect(() => {
     const initAuth = async () => {
       const token = localStorage.getItem('accessToken');
@@ -34,7 +51,12 @@ export const AuthProvider = ({ children }) => {
           localStorage.setItem('user', JSON.stringify(currentUser));
         } catch (error) {
           console.error('Token validation failed:', error);
-          logout();
+          // Clear localStorage and state without showing toast
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('refreshToken');
+          localStorage.removeItem('user');
+          setUser(null);
+          setIsAuthenticated(false);
         }
       }
       setLoading(false);
@@ -46,13 +68,24 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     try {
       const response = await loginApi({ email, password });
-      const { accessToken, refreshToken, username } = response;
+      const { accessToken, refreshToken, username, email: userEmail } = response;
 
       localStorage.setItem('accessToken', accessToken);
       localStorage.setItem('refreshToken', refreshToken);
 
-      // Fetch full user details
-      const currentUser = await getCurrentUser();
+      // Add a small delay to ensure token is available for axios interceptor
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Fetch full user details with fallback to login response data
+      let currentUser;
+      try {
+        currentUser = await getCurrentUser();
+      } catch (fetchError) {
+        console.error('Failed to fetch user details, using login response data:', fetchError);
+        // Fallback to basic user data from login response
+        currentUser = { username, email: userEmail };
+      }
+      
       localStorage.setItem('user', JSON.stringify(currentUser));
       
       setUser(currentUser);
@@ -61,9 +94,16 @@ export const AuthProvider = ({ children }) => {
       return { success: true };
     } catch (error) {
       const errorData = error.response?.data;
-      const message = typeof errorData === 'string' 
-        ? errorData 
-        : errorData?.message || 'Login failed. Please try again.';
+      let message;
+      if (typeof errorData === 'string') {
+        message = errorData;
+      } else if (errorData?.message) {
+        message = errorData.message;
+      } else if (errorData?.error) {
+        message = errorData.error;
+      } else {
+        message = 'Login failed. Please try again.';
+      }
       toast.error(message);
       return { success: false, error: message };
     }
@@ -81,21 +121,6 @@ export const AuthProvider = ({ children }) => {
         : errorData?.message || 'Registration failed. Please try again.';
       toast.error(message);
       return { success: false, error: message };
-    }
-  };
-
-  const logout = async () => {
-    try {
-      await logoutApi();
-    } catch (error) {
-      console.error('Logout error:', error);
-    } finally {
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
-      localStorage.removeItem('user');
-      setUser(null);
-      setIsAuthenticated(false);
-      toast.success('Logged out successfully');
     }
   };
 

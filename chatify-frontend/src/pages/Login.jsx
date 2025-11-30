@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import LoadingSpinner from '../components/Common/LoadingSpinner';
@@ -15,9 +15,15 @@ const Login = () => {
 
   const from = location.state?.from?.pathname || '/chat';
 
-  // Redirect if already authenticated
+  // Redirect if already authenticated using useEffect
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate(from, { replace: true });
+    }
+  }, [isAuthenticated, navigate, from]);
+
+  // Early return after hooks are consistently called
   if (isAuthenticated) {
-    navigate(from, { replace: true });
     return null;
   }
 
@@ -31,13 +37,18 @@ const Login = () => {
     }
 
     setLoading(true);
-    const result = await login(email, password);
-    setLoading(false);
+    try {
+      const result = await login(email, password);
 
-    if (result.success) {
-      navigate(from, { replace: true });
-    } else {
-      setError(result.error);
+      if (result.success) {
+        navigate(from, { replace: true });
+      } else {
+        setError(result.error);
+      }
+    } catch {
+      setError('An unexpected error occurred. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 

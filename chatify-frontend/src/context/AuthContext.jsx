@@ -60,7 +60,10 @@ export const AuthProvider = ({ children }) => {
       toast.success(`Welcome back, ${username}!`);
       return { success: true };
     } catch (error) {
-      const message = error.response?.data || 'Login failed. Please try again.';
+      const errorData = error.response?.data;
+      const message = typeof errorData === 'string' 
+        ? errorData 
+        : errorData?.message || 'Login failed. Please try again.';
       toast.error(message);
       return { success: false, error: message };
     }
@@ -72,7 +75,10 @@ export const AuthProvider = ({ children }) => {
       toast.success('Registration successful! Please login.');
       return { success: true };
     } catch (error) {
-      const message = error.response?.data || 'Registration failed. Please try again.';
+      const errorData = error.response?.data;
+      const message = typeof errorData === 'string' 
+        ? errorData 
+        : errorData?.message || 'Registration failed. Please try again.';
       toast.error(message);
       return { success: false, error: message };
     }

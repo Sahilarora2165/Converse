@@ -21,8 +21,11 @@ const ChatWindow = ({ chatRoomId, onChatUpdated }) => {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
+  const [isSubscribed, setIsSubscribed] = useState(false);
   const messagesEndRef = useRef(null);
   const previousChatRoomIdRef = useRef(null);
+  const loadedMessagesRef = useRef(new Set());
+  const isLoadingRef = useRef(false);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -41,12 +44,17 @@ const ChatWindow = ({ chatRoomId, onChatUpdated }) => {
   }, [chatRoomId]);
 
   const loadMessages = useCallback(async () => {
-    if (!chatRoomId) return;
+    if (!chatRoomId || isLoadingRef.current) return;
     
     try {
+      isLoadingRef.current = true;
       setLoading(true);
       const data = await getMessages(chatRoomId);
+      
+      // Track loaded message IDs to prevent duplicates
+      loadedMessagesRef.current = new Set(data.map(m => m.id));
       setMessages(data);
+      
       // Mark all messages as read when opening the chat
       await markAllMessagesAsRead(chatRoomId);
       if (onChatUpdated) onChatUpdated();
@@ -55,22 +63,26 @@ const ChatWindow = ({ chatRoomId, onChatUpdated }) => {
       toast.error('Failed to load messages');
     } finally {
       setLoading(false);
+      isLoadingRef.current = false;
     }
   }, [chatRoomId, onChatUpdated]);
 
   const handleNewMessage = useCallback((message) => {
+    if (!message || !message.id) return;
+    
     setMessages((prev) => {
-      // Avoid duplicates
-      if (prev.some((m) => m.id === message.id)) {
+      // Avoid duplicates using both array check and ref set
+      if (prev.some((m) => m.id === message.id) || loadedMessagesRef.current.has(message.id)) {
         return prev;
       }
+      loadedMessagesRef.current.add(message.id);
       return [...prev, message];
     });
     scrollToBottom();
     
     // Mark as read if it's from someone else
     if (message.senderId !== user?.id) {
-      markAllMessagesAsRead(chatRoomId);
+      markAllMessagesAsRead(chatRoomId).catch(console.error);
       if (onChatUpdated) onChatUpdated();
     }
   }, [chatRoomId, user?.id, scrollToBottom, onChatUpdated]);
@@ -90,39 +102,67 @@ const ChatWindow = ({ chatRoomId, onChatUpdated }) => {
   }, []);
 
   const handleMessageSent = useCallback((message) => {
+    if (!message || !message.id) return;
+    
     setMessages((prev) => {
-      // Avoid duplicates
-      if (prev.some((m) => m.id === message.id)) {
+      // Avoid duplicates using both array check and ref set
+      if (prev.some((m) => m.id === message.id) || loadedMessagesRef.current.has(message.id)) {
         return prev;
       }
+      loadedMessagesRef.current.add(message.id);
       return [...prev, message];
     });
     scrollToBottom();
     if (onChatUpdated) onChatUpdated();
   }, [scrollToBottom, onChatUpdated]);
 
+  // Reset state when chatRoomId changes
+  useEffect(() => {
+    if (chatRoomId !== previousChatRoomIdRef.current) {
+      // Clear state for the new chat room
+      setMessages([]);
+      setChatRoom(null);
+      setIsSubscribed(false);
+      loadedMessagesRef.current = new Set();
+      previousChatRoomIdRef.current = chatRoomId;
+    }
+  }, [chatRoomId]);
+
   // Load chat room and messages when chatRoomId changes
   useEffect(() => {
-    if (chatRoomId && chatRoomId !== previousChatRoomIdRef.current) {
-      previousChatRoomIdRef.current = chatRoomId;
+    if (chatRoomId) {
       loadChatRoom();
       loadMessages();
     }
   }, [chatRoomId, loadChatRoom, loadMessages]);
 
-  // Subscribe to WebSocket when connected
+  // Subscribe to WebSocket after messages are loaded to prevent race conditions
   useEffect(() => {
-    if (isConnected && chatRoomId) {
+    if (!chatRoomId || loading || isSubscribed) return;
+    
+    // Only subscribe after messages have finished loading (loading is false and not in loading state)
+    if (!isLoadingRef.current) {
       subscribeToChatRoom(chatRoomId, handleNewMessage);
       setReadReceiptCallback(chatRoomId, handleReadReceipt);
+      setIsSubscribed(true);
     }
 
     return () => {
-      if (chatRoomId) {
+      if (chatRoomId && isSubscribed) {
         unsubscribeFromChatRoom(chatRoomId);
+        setIsSubscribed(false);
       }
     };
-  }, [isConnected, chatRoomId, subscribeToChatRoom, unsubscribeFromChatRoom, handleNewMessage, handleReadReceipt, setReadReceiptCallback]);
+  }, [chatRoomId, loading, isSubscribed, subscribeToChatRoom, unsubscribeFromChatRoom, handleNewMessage, handleReadReceipt, setReadReceiptCallback]);
+
+  // Re-subscribe when WebSocket reconnects
+  useEffect(() => {
+    if (isConnected && chatRoomId && !isSubscribed && !loading) {
+      subscribeToChatRoom(chatRoomId, handleNewMessage);
+      setReadReceiptCallback(chatRoomId, handleReadReceipt);
+      setIsSubscribed(true);
+    }
+  }, [isConnected, chatRoomId, isSubscribed, loading, subscribeToChatRoom, handleNewMessage, handleReadReceipt, setReadReceiptCallback]);
 
   // Scroll to bottom when messages load
   useEffect(() => {

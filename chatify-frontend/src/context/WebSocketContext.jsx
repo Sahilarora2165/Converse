@@ -17,11 +17,14 @@ export const useWebSocket = () => {
 export const WebSocketProvider = ({ children }) => {
   const { user, isAuthenticated } = useAuth();
   const [isConnected, setIsConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
   const [typingUsers, setTypingUsers] = useState({});
   const [onlineUsers, setOnlineUsers] = useState({});
   const messageCallbacksRef = useRef({});
   const readReceiptCallbacksRef = useRef({});
   const typingTimeoutsRef = useRef({});
+  const pendingSubscriptionsRef = useRef([]);
+  const hasShownConnectionErrorRef = useRef(false);
 
   const handlePresenceUpdate = useCallback((presence) => {
     if (presence && presence.userId) {
@@ -86,44 +89,8 @@ export const WebSocketProvider = ({ children }) => {
     }
   }, []);
 
-  useEffect(() => {
-    if (isAuthenticated && user) {
-      const token = localStorage.getItem('accessToken');
-      if (token) {
-        webSocketService.connect(
-          token,
-          () => {
-            setIsConnected(true);
-            webSocketService.notifyConnected();
-            // Subscribe to global presence updates
-            webSocketService.subscribeToPresence(handlePresenceUpdate);
-            // Subscribe to user-specific messages
-            webSocketService.subscribeToUserMessages((message) => {
-              toast.info(`New message from ${message.senderUsername}`);
-            });
-          },
-          (error) => {
-            setIsConnected(false);
-            toast.error(error || 'WebSocket connection error');
-          }
-        );
-      }
-    }
-
-    return () => {
-      if (isAuthenticated) {
-        webSocketService.notifyDisconnected();
-        webSocketService.disconnect();
-        setIsConnected(false);
-      }
-    };
-  }, [isAuthenticated, user, handlePresenceUpdate]);
-
-  const subscribeToChatRoom = useCallback((chatRoomId, onMessage) => {
-    if (!isConnected) return null;
-
-    messageCallbacksRef.current[chatRoomId] = onMessage;
-    
+  // Helper function to subscribe to chat room channels
+  const subscribeToChatRoomChannels = useCallback((chatRoomId) => {
     webSocketService.subscribeToChatRoom(chatRoomId, (message) => {
       if (messageCallbacksRef.current[chatRoomId]) {
         messageCallbacksRef.current[chatRoomId](message);
@@ -139,7 +106,94 @@ export const WebSocketProvider = ({ children }) => {
         readReceiptCallbacksRef.current[chatRoomId](receipt);
       }
     });
-  }, [isConnected, handleTypingIndicator]);
+  }, [handleTypingIndicator]);
+
+  // Process any pending subscriptions after reconnection
+  const processPendingSubscriptions = useCallback(() => {
+    const pending = [...pendingSubscriptionsRef.current];
+    pendingSubscriptionsRef.current = [];
+    
+    pending.forEach(({ chatRoomId }) => {
+      if (messageCallbacksRef.current[chatRoomId]) {
+        subscribeToChatRoomChannels(chatRoomId);
+      }
+    });
+  }, [subscribeToChatRoomChannels]);
+
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      const token = localStorage.getItem('accessToken');
+      if (token) {
+        hasShownConnectionErrorRef.current = false;
+        
+        // Listen for connection state changes from the service
+        const unsubscribeState = webSocketService.onConnectionStateChange((connected) => {
+          setIsConnected(connected);
+          setIsConnecting(webSocketService.isConnecting);
+          
+          if (connected) {
+            hasShownConnectionErrorRef.current = false;
+            // Re-subscribe to pending subscriptions after reconnection
+            processPendingSubscriptions();
+          }
+        });
+
+        webSocketService.connect(
+          token,
+          () => {
+            setIsConnected(true);
+            setIsConnecting(false);
+            webSocketService.notifyConnected();
+            // Subscribe to global presence updates
+            webSocketService.subscribeToPresence(handlePresenceUpdate);
+            // Subscribe to user-specific messages
+            webSocketService.subscribeToUserMessages((message) => {
+              if (message && message.senderUsername) {
+                toast(`New message from ${message.senderUsername}`, { icon: '💬' });
+              }
+            });
+          },
+          (error) => {
+            setIsConnected(false);
+            setIsConnecting(false);
+            if (!hasShownConnectionErrorRef.current) {
+              hasShownConnectionErrorRef.current = true;
+              toast.error(error || 'WebSocket connection error');
+            }
+          }
+        );
+
+        return () => {
+          unsubscribeState();
+          webSocketService.notifyDisconnected();
+          webSocketService.disconnect();
+          setIsConnected(false);
+          setIsConnecting(false);
+        };
+      }
+    }
+
+    return () => {
+      if (isAuthenticated) {
+        webSocketService.notifyDisconnected();
+        webSocketService.disconnect();
+        setIsConnected(false);
+        setIsConnecting(false);
+      }
+    };
+  }, [isAuthenticated, user, handlePresenceUpdate, processPendingSubscriptions]);
+
+  const subscribeToChatRoom = useCallback((chatRoomId, onMessage) => {
+    messageCallbacksRef.current[chatRoomId] = onMessage;
+    
+    if (!isConnected) {
+      // Store for later subscription when connected
+      pendingSubscriptionsRef.current.push({ chatRoomId, onMessage });
+      return null;
+    }
+
+    subscribeToChatRoomChannels(chatRoomId);
+  }, [isConnected, subscribeToChatRoomChannels]);
 
   const unsubscribeFromChatRoom = useCallback((chatRoomId) => {
     webSocketService.unsubscribe(`/topic/chatroom/${chatRoomId}`);
@@ -147,6 +201,10 @@ export const WebSocketProvider = ({ children }) => {
     webSocketService.unsubscribe(`/topic/chatroom/${chatRoomId}/read`);
     delete messageCallbacksRef.current[chatRoomId];
     delete readReceiptCallbacksRef.current[chatRoomId];
+    // Remove from pending subscriptions if present
+    pendingSubscriptionsRef.current = pendingSubscriptionsRef.current.filter(
+      (sub) => sub.chatRoomId !== chatRoomId
+    );
   }, []);
 
   const sendMessage = useCallback((message) => {
@@ -186,6 +244,7 @@ export const WebSocketProvider = ({ children }) => {
 
   const value = {
     isConnected,
+    isConnecting,
     typingUsers,
     onlineUsers,
     subscribeToChatRoom,

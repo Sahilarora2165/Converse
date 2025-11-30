@@ -27,10 +27,12 @@ out/
 .DS_Store
 Thumbs.db
 
-# Application properties that contain secrets
-application.properties
-application.yml
-*.env
+# Application properties that contain secrets (keep .example files)
+src/main/resources/application.properties
+src/main/resources/application.yml
+src/main/resources/application-*.properties
+src/main/resources/application-*.yml
+!src/main/resources/application.properties.example
 
 # Temporary files
 *.tmp
@@ -45,10 +47,17 @@ hs_err_pid*
 node_modules/
 dist/
 
-# Environment & properties
-application-*.yml
-application-*.yaml
-application-*.properties
+# Environment files (keep .example files)
 .env
+.env.local
+.env.*.local
+chatify-frontend/.env
+chatify-frontend/.env.local
+!chatify-frontend/.env.example
+
+# Security keys
 *.key
 *.pem
+
+# Upload directory
+uploads/

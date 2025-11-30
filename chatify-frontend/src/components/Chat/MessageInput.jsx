@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
 import { useTypingIndicator } from '../../hooks/useTypingIndicator';
+import { useWebSocket } from '../../context/WebSocketContext';
 import { sendMessage, sendMessageWithFile } from '../../api/messages';
 import { MESSAGE_TYPES, ALLOWED_FILE_TYPES, MAX_FILE_SIZE } from '../../utils/constants';
 import FileUpload from './FileUpload';
@@ -12,6 +13,7 @@ const MessageInput = ({ chatRoomId, onMessageSent }) => {
   const [sending, setSending] = useState(false);
   const inputRef = useRef(null);
   const { startTyping, stopTyping } = useTypingIndicator(chatRoomId);
+  const { isConnected } = useWebSocket();
 
   const handleInputChange = (e) => {
     setMessage(e.target.value);
@@ -64,6 +66,8 @@ const MessageInput = ({ chatRoomId, onMessageSent }) => {
     try {
       let sentMessage;
       
+      // Always use REST API for sending messages (acts as fallback when WebSocket is disconnected)
+      // The message will be broadcast via WebSocket by the backend
       if (selectedFile) {
         sentMessage = await sendMessageWithFile(chatRoomId, message, selectedFile);
       } else {
@@ -78,14 +82,20 @@ const MessageInput = ({ chatRoomId, onMessageSent }) => {
       setSelectedFile(null);
       setPreviewUrl(null);
       
-      if (onMessageSent) {
+      if (onMessageSent && sentMessage) {
         onMessageSent(sentMessage);
       }
       
       inputRef.current?.focus();
+      
+      // Show warning if WebSocket is disconnected (message still sent via REST)
+      if (!isConnected) {
+        toast('Message sent. Real-time updates may be delayed.', { icon: '⚠️' });
+      }
     } catch (error) {
       console.error('Failed to send message:', error);
-      toast.error('Failed to send message');
+      const errorMessage = error.response?.data?.message || 'Failed to send message';
+      toast.error(errorMessage);
     } finally {
       setSending(false);
     }

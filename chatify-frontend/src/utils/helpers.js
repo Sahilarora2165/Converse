@@ -40,6 +40,7 @@ export const getInitials = (name) => {
 };
 
 export const getChatDisplayName = (chatRoom, currentUserId) => {
+  if (!chatRoom) return 'Unknown Chat';
   if (chatRoom.isGroupChat) {
     return chatRoom.name || 'Group Chat';
   }
@@ -50,7 +51,7 @@ export const getChatDisplayName = (chatRoom, currentUserId) => {
 };
 
 export const getOtherParticipant = (chatRoom, currentUserId) => {
-  if (!chatRoom.participants) return null;
+  if (!chatRoom || !chatRoom.participants) return null;
   return chatRoom.participants.find((p) => p.id !== currentUserId);
 };
 

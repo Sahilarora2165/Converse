@@ -110,7 +110,7 @@ public class AuthService {
 
     @Transactional
     public void logout(String email) {
-        userRepository.findByUsername(email).ifPresent(user -> {
+        userRepository.findByEmail(email).ifPresent(user -> {
             int deletedCount = refreshTokenRepository.deleteAllByUser(user);
             System.out.println("Deleted " + deletedCount + " refresh tokens for user: " + email);
         });

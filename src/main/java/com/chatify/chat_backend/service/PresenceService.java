@@ -12,13 +12,6 @@ import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Service for managing user presence (online/offline status).
- * 
- * NOTE: This implementation uses an in-memory ConcurrentHashMap for storing presence data.
- * For production deployments with multiple server instances, consider using a distributed
- * cache like Redis to ensure presence data is shared across all instances.
- */
 @Service
 public class PresenceService {
 

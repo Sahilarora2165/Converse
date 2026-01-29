@@ -41,7 +41,8 @@ public class UserController {
     }
 
     @GetMapping("/search")
-    public ResponseEntity<List<UserDTO>> searchUsers(@RequestParam String query) {
+    public ResponseEntity<List<UserDTO>> searchUsers(@RequestParam("query") String query) {
+        // This calls the method in UserService, which calls the @Query in UserRepository
         return ResponseEntity.ok(userService.searchUsers(query));
     }
 

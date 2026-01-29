@@ -1,8 +1,11 @@
 package com.chatify.chat_backend.controller;
 
 import com.chatify.chat_backend.dto.ChatRoomDTO;
-import com.chatify.chat_backend.dto.CreateChatRoomDTO;
+import com.chatify.chat_backend.dto.CreateChatRequest;
 import com.chatify.chat_backend.dto.UserDTO;
+import com.chatify.chat_backend.entity.ChatRoom;
+import com.chatify.chat_backend.entity.User;
+import com.chatify.chat_backend.exception.BadRequestException;
 import com.chatify.chat_backend.service.ChatRoomService;
 import com.chatify.chat_backend.service.UserService;
 import jakarta.validation.Valid;
@@ -11,8 +14,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/chatrooms")
@@ -26,26 +29,25 @@ public class ChatRoomController {
         this.userService = userService;
     }
 
+
     @PostMapping
     public ResponseEntity<ChatRoomDTO> createChatRoom(
-            @Valid @RequestBody CreateChatRoomDTO dto,
+            @RequestBody CreateChatRequest request,
             Authentication authentication) {
+
         String email = authentication.getName();
         UserDTO currentUser = userService.getUserByEmail(email);
 
-        ChatRoomDTO chatRoom;
-        if (dto.isGroupChat()) {
-            chatRoom = chatRoomService.createGroupChat(dto, currentUser.getId());
-        } else {
-            if (dto.getParticipantIds() == null || dto.getParticipantIds().isEmpty()) {
-                return ResponseEntity.badRequest().build();
-            }
-            Long otherUserId = dto.getParticipantIds().iterator().next();
-            chatRoom = chatRoomService.createPrivateChat(currentUser.getId(), otherUserId);
-        }
+        ChatRoomDTO chatRoom = chatRoomService.createChatRoom(
+                request.getName(),
+                request.isGroupChat(),
+                request.getParticipantIds(),
+                currentUser.getId()
+        );
 
-        return ResponseEntity.status(HttpStatus.CREATED).body(chatRoom);
+        return ResponseEntity.ok(chatRoom);
     }
+
 
     @GetMapping
     public ResponseEntity<List<ChatRoomDTO>> getChatRoomsForUser(Authentication authentication) {
@@ -61,6 +63,20 @@ public class ChatRoomController {
         String email = authentication.getName();
         UserDTO currentUser = userService.getUserByEmail(email);
         return ResponseEntity.ok(chatRoomService.getChatRoomById(id, currentUser.getId()));
+    }
+
+    @GetMapping("/search")
+    public ResponseEntity<List<UserDTO>> searchUsers(@RequestParam("query") String query) {
+        List<UserDTO> allUsers = userService.getAllUsers();
+
+
+        List<UserDTO> filteredUsers = allUsers.stream()
+                .filter(user ->
+                        user.getUsername().toLowerCase().contains(query.toLowerCase()) ||
+                                user.getEmail().toLowerCase().contains(query.toLowerCase()))
+                .collect(Collectors.toList());
+
+        return ResponseEntity.ok(filteredUsers);
     }
 
     @PostMapping("/{id}/participants")

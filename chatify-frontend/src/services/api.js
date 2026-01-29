@@ -43,4 +43,16 @@ api.interceptors.response.use(
 export const loginAPI = (email, password) => api.post('/auth/login', { email, password });
 export const signupAPI = (userData) => api.post('/auth/signup', userData);
 
+export const getChatRooms = () => api.get('/chatrooms');
+
+// Matches MessageController.java: @RequestMapping("/api/messages") + @GetMapping("/chatroom/{chatRoomId}")
+export const getChatHistory = (roomId) => api.get(`/messages/chatroom/${roomId}`);
+export const searchUsers = (query) => api.get(`/chatrooms/search?query=${query}`);
+
+export const createChatRoom = (name, isGroup, participantIds) =>
+    api.post('/chatrooms', { name, isGroupChat: isGroup, participantIds });
+
+export const sendMessageAPI = (messageData) => api.post('/messages', messageData);
+// Helper to get all users (useful for starting new chats)
+export const getAllUsers = () => api.get('/users');
 export default api;

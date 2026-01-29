@@ -27,6 +27,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         this.userDetailsService = userDetailsService;
     }
 
+
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        String path = request.getRequestURI();
+
+        return path.startsWith("/ws")
+                || path.startsWith("/api/auth");
+    }
+
+
     /**
      * Filter method that runs once per request to validate JWT token
      */

@@ -1,4 +1,3 @@
-
 package com.chatify.chat_backend.config;
 
 import com.chatify.chat_backend.security.CustomUserDetailsService;
@@ -15,7 +14,11 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.List;
 
 @Configuration
 @EnableWebSecurity
@@ -23,36 +26,54 @@ public class SecurityConfig {
 
     private final CustomUserDetailsService userDetailsService;
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
-    private final CorsConfigurationSource corsConfigurationSource;
 
     public SecurityConfig(
             CustomUserDetailsService userDetailsService,
-            JwtAuthenticationFilter jwtAuthenticationFilter,
-            CorsConfigurationSource corsConfigurationSource) {
+            JwtAuthenticationFilter jwtAuthenticationFilter
+    ) {
         this.userDetailsService = userDetailsService;
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
-        this.corsConfigurationSource = corsConfigurationSource;
     }
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+
         http
-                .cors(cors -> cors.configurationSource(corsConfigurationSource))
+                // CORS (DEV ONLY – restrict in prod)
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+
+                // Stateless API
                 .csrf(csrf -> csrf.disable())
-                .authorizeHttpRequests(authz -> authz
-                        .requestMatchers("/ws/**", "/ws").permitAll()
+
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                )
+
+                // Authorization rules
+                .authorizeHttpRequests(auth -> auth
+                        // WebSocket handshake (NO HTTP security)
+                        .requestMatchers("/ws/**").permitAll()
+
+                        // Auth endpoints
                         .requestMatchers("/api/auth/**").permitAll()
+
+                        // Static / uploads
                         .requestMatchers("/uploads/**").permitAll()
+
+                        // Everything else needs JWT
                         .anyRequest().authenticated()
                 )
-                .sessionManagement(session -> session
-                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
-                )
+
+                // DAO auth (used by AuthenticationManager)
                 .authenticationProvider(authenticationProvider())
+
+                // JWT filter for REST APIs ONLY
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
+
+    // ===================== Beans =====================
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -61,14 +82,29 @@ public class SecurityConfig {
 
     @Bean
     public DaoAuthenticationProvider authenticationProvider() {
-        DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
-        authProvider.setUserDetailsService(userDetailsService);
-        authProvider.setPasswordEncoder(passwordEncoder());
-        return authProvider;
+        DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
+        provider.setUserDetailsService(userDetailsService);
+        provider.setPasswordEncoder(passwordEncoder());
+        return provider;
     }
 
     @Bean
-    public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
-        return authConfig.getAuthenticationManager();
+    public AuthenticationManager authenticationManager(
+            AuthenticationConfiguration configuration) throws Exception {
+        return configuration.getAuthenticationManager();
+    }
+
+    // DEV ONLY – tighten in production
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOriginPatterns(List.of("*"));
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        config.setAllowedHeaders(List.of("*"));
+        config.setAllowCredentials(true);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", config);
+        return source;
     }
 }

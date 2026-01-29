@@ -3,6 +3,8 @@ package com.chatify.chat_backend.config;
 import com.chatify.chat_backend.security.JwtUtil;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.simp.config.ChannelRegistration;
@@ -16,9 +18,13 @@ import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBr
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 
+import java.util.List;
+
 @Configuration
 @EnableWebSocketMessageBroker
+@Order(Ordered.HIGHEST_PRECEDENCE + 99)
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
+
     private final JwtUtil jwtUtil;
 
     @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:5173}")
@@ -29,56 +35,54 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     }
 
     @Override
-    public void registerStompEndpoints(StompEndpointRegistry registry){
+    public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws")
-                .setAllowedOrigins(allowedOrigins.split(","))
+                .setAllowedOriginPatterns("*") // Allow all for testing
                 .withSockJS();
     }
 
-
     @Override
-    // Configure how messages are routed
     public void configureMessageBroker(MessageBrokerRegistry registry) {
-
-        // Prefix for messages from client to server (@MessageMapping)
+        registry.enableSimpleBroker("/topic", "/user");
         registry.setApplicationDestinationPrefixes("/app");
-
-        // Enable simple in-memory broker for broadcasting messages
-        registry.enableSimpleBroker("/topic", "/queue", "/user");
-
-        // Prefix for sending messages to specific users
         registry.setUserDestinationPrefix("/user");
     }
-
 
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
         registration.interceptors(new ChannelInterceptor() {
-
             @Override
             public Message<?> preSend(Message<?> message, MessageChannel channel) {
-                StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(
-                        message, StompHeaderAccessor.class);
+                StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
 
                 if (StompCommand.CONNECT.equals(accessor.getCommand())) {
                     String authHeader = accessor.getFirstNativeHeader("Authorization");
 
-                    if (authHeader != null && authHeader.startsWith("Bearer ")) {
-                        String token = authHeader.substring(7);
-                        String email = jwtUtil.extractUsername(token);
+                    // DEBUG LOG
+                    System.out.println("WebSocket Connect Request Received");
 
-                        if (email != null && jwtUtil.isTokenValid(token, email)) {
-                            UsernamePasswordAuthenticationToken auth =
-                                    new UsernamePasswordAuthenticationToken(email, null, null);
-                            accessor.setUser(auth);
-                            return message;
+                    if (authHeader != null && authHeader.toLowerCase().startsWith("bearer")) {
+                        String token = authHeader.replace("Bearer", "").trim();
+
+                        try {
+                            String email = jwtUtil.extractUsername(token);
+
+                            if (email != null && jwtUtil.isTokenValid(token, email)) {
+                                UsernamePasswordAuthenticationToken auth =
+                                        new UsernamePasswordAuthenticationToken(email, null, List.of());
+
+                                accessor.setUser(auth);
+                                System.out.println("✅ WebSocket Authenticated User: " + email);
+                            } else {
+                                System.out.println("❌ Token Invalid");
+                            }
+                        } catch (Exception e) {
+                            System.out.println("❌ Error parsing JWT in WebSocket: " + e.getMessage());
                         }
+                    } else {
+                        System.out.println("⚠️ No Authorization Header found in WebSocket CONNECT frame");
                     }
-
-                    // ⚠️ Reject connection if authentication fails
-                    throw new IllegalArgumentException("Invalid or missing authentication token");
                 }
-
                 return message;
             }
         });

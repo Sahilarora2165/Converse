@@ -53,7 +53,7 @@ dist/
 .env.*.local
 chatify-frontend/.env
 chatify-frontend/.env.local
-!chatify-frontend/.env.example
+!chatify-frontend/.env
 
 # Security keys
 *.key

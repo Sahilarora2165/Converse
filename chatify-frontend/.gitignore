@@ -12,7 +12,7 @@ dist
 dist-ssr
 *.local
 
-# Environment files (keep .env.example)
+# Environment files (keep .env)
 .env
 .env.local
 .env.*.local

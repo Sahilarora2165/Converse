@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Group Chat Test</title>
+
+    <!-- SockJS + STOMP -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.1/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        .box { border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; }
+        #messages {
+            height: 200px;
+            overflow-y: scroll;
+            border: 1px solid #333;
+            margin-top: 10px;
+            padding: 5px;
+        }
+    </style>
+</head>
+
+<body>
+
+<h2>Real-Time Group Chat Test</h2>
+
+<!-- 1. Connection -->
+<div class="box">
+    <h3>1. Connection Setup</h3>
+    <input
+            type="text"
+            id="jwtToken"
+            placeholder="Paste RAW JWT token only (NO Bearer)"
+            style="width: 100%;"
+    />
+    <br><br>
+    <button onclick="connect()">Connect</button>
+    <span id="status" style="color:red">Disconnected</span>
+</div>
+
+<!-- 2. Room -->
+<div class="box">
+    <h3>2. Chat Room</h3>
+    <input type="text" id="roomId" value="39" placeholder="Room ID">
+    <button onclick="subscribe()">Join Room</button>
+</div>
+
+<!-- 3. Send -->
+<div class="box">
+    <h3>3. Send Message</h3>
+    <input type="text" id="messageContent" placeholder="Type a message...">
+    <button onclick="sendMessage()">Send</button>
+</div>
+
+<h3>Live Messages</h3>
+<div id="messages"></div>
+
+<script>
+    let stompClient = null;
+
+    function connect() {
+        let token = document.getElementById("jwtToken").value.trim();
+
+        if (!token) {
+            alert("JWT token required");
+            return;
+        }
+
+        // Defensive: remove Bearer if user pasted it accidentally
+        token = token.replace(/^Bearer\s+/i, "").trim();
+
+        console.log("JWT length:", token.length);
+
+        const socket = new SockJS("http://localhost:8080/ws");
+        stompClient = Stomp.over(socket);
+
+        // Disable noisy logs
+        stompClient.debug = null;
+
+        stompClient.connect(
+            {
+                Authorization: `Bearer ${token}`
+            },
+            function (frame) {
+                document.getElementById("status").innerText = "Connected";
+                document.getElementById("status").style.color = "green";
+                console.log("WebSocket Connected:", frame);
+            },
+            function (error) {
+                console.error("WebSocket error:", error);
+                alert("Connection failed. Check console.");
+            }
+        );
+    }
+
+    function subscribe() {
+        if (!stompClient) {
+            alert("Connect first");
+            return;
+        }
+
+        const roomId = document.getElementById("roomId").value;
+
+        stompClient.subscribe(`/topic/chatroom/${roomId}`, function (message) {
+            showMessage(JSON.parse(message.body));
+        });
+
+        alert("Subscribed to room " + roomId);
+    }
+
+    function sendMessage() {
+        if (!stompClient) {
+            alert("Connect first");
+            return;
+        }
+
+        const roomId = document.getElementById("roomId").value;
+        const content = document.getElementById("messageContent").value;
+
+        if (!content.trim()) return;
+
+        const chatMessage = {
+            chatRoomId: roomId,
+            content: content,
+            messageType: "TEXT"
+        };
+
+        stompClient.send(
+            `/app/chat/${roomId}/sendMessage`,
+            {},
+            JSON.stringify(chatMessage)
+        );
+
+        document.getElementById("messageContent").value = "";
+    }
+
+    function showMessage(message) {
+        const messages = document.getElementById("messages");
+        const p = document.createElement("p");
+
+        p.innerHTML = `<b>${message.senderName || "User"}:</b> ${message.content}`;
+        messages.appendChild(p);
+
+        messages.scrollTop = messages.scrollHeight;
+    }
+</script>
+
+</body>
+</html>

@@ -61,6 +61,7 @@ public class AuthService {
         return "User registered successfully";
     }
 
+    @Transactional
     public AuthResponseDTO login(UserLoginDTO request) {
         String email = request.getEmail();
         String password = request.getPassword();

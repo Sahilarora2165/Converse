@@ -94,7 +94,7 @@ Before you begin, ensure you have the following installed:
 
 2. Create the environment file:
    ```bash
-   cp .env.example .env
+   cp .env .env
    ```
 
 3. Install dependencies:

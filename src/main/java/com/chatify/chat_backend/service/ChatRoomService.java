@@ -1,7 +1,7 @@
 package com.chatify.chat_backend.service;
 
 import com.chatify.chat_backend.dto.ChatRoomDTO;
-import com.chatify.chat_backend.dto.CreateChatRoomDTO;
+import com.chatify.chat_backend.dto.CreateChatRequest;
 import com.chatify.chat_backend.dto.UserDTO;
 import com.chatify.chat_backend.entity.ChatRoom;
 import com.chatify.chat_backend.entity.User;
@@ -34,49 +34,6 @@ public class ChatRoomService {
         this.userService = userService;
     }
 
-    @Transactional
-    public ChatRoomDTO createPrivateChat(Long userId1, Long userId2) {
-        User user1 = userService.getUserEntityById(userId1);
-        User user2 = userService.getUserEntityById(userId2);
-
-        Optional<ChatRoom> existingChat = chatRoomRepository.findPrivateChatBetweenUsers(user1, user2);
-        if (existingChat.isPresent()) {
-            return mapToDTO(existingChat.get(), user1);
-        }
-
-        ChatRoom chatRoom = new ChatRoom();
-        chatRoom.setGroupChat(false);
-        chatRoom.setParticipants(new HashSet<>(Set.of(user1, user2)));
-        
-        ChatRoom savedRoom = chatRoomRepository.save(chatRoom);
-        return mapToDTO(savedRoom, user1);
-    }
-
-    @Transactional
-    public ChatRoomDTO createGroupChat(CreateChatRoomDTO dto, Long adminId) {
-        if (dto.getName() == null || dto.getName().isBlank()) {
-            throw new BadRequestException("Group chat name is required");
-        }
-
-        User admin = userService.getUserEntityById(adminId);
-        
-        Set<User> participants = new HashSet<>();
-        participants.add(admin);
-        
-        for (Long participantId : dto.getParticipantIds()) {
-            User participant = userService.getUserEntityById(participantId);
-            participants.add(participant);
-        }
-
-        ChatRoom chatRoom = new ChatRoom();
-        chatRoom.setName(dto.getName());
-        chatRoom.setGroupChat(true);
-        chatRoom.setParticipants(participants);
-        chatRoom.setAdmin(admin);
-
-        ChatRoom savedRoom = chatRoomRepository.save(chatRoom);
-        return mapToDTO(savedRoom, admin);
-    }
 
     @Transactional
     public ChatRoomDTO addParticipant(Long chatRoomId, Long userId, Long requesterId) {
@@ -123,6 +80,78 @@ public class ChatRoomService {
                 .map(room -> mapToDTO(room, user))
                 .collect(Collectors.toList());
     }
+
+
+
+    @Transactional
+    public ChatRoomDTO createChatRoom(
+            String name,
+            boolean isGroupChat,
+            List<Long> participantIds,
+            Long currentUserId
+    ) {
+        User currentUser = userService.getUserEntityById(currentUserId);
+
+        // 1. VALIDATION (IMPORTANT)
+
+        if (!isGroupChat && participantIds.size() != 1) {
+            throw new BadRequestException(
+                    "Private chat must have exactly one other participant"
+            );
+        }
+
+        if (isGroupChat && participantIds.isEmpty()) {
+            throw new BadRequestException(
+                    "Group chat must have at least one participant"
+            );
+        }
+
+        // 2. CHECK EXISTING PRIVATE CHAT
+
+        if (!isGroupChat) {
+            Long otherUserId = participantIds.get(0);
+
+            Optional<ChatRoom> existing =
+                    chatRoomRepository.findExistingPrivateChat(currentUserId, otherUserId);
+
+            if (existing.isPresent()) {
+                return mapToDTO(existing.get(), currentUser);
+            }
+        }
+
+        // 3. CREATE NEW CHAT ROOM
+
+        ChatRoom chatRoom = new ChatRoom();
+        chatRoom.setGroupChat(isGroupChat);
+
+        if (isGroupChat) {
+            chatRoom.setName(name);
+            chatRoom.setAdmin(currentUser);
+        } else {
+            chatRoom.setName("Private Chat");
+            chatRoom.setAdmin(null); // private chats have no admin
+        }
+
+        // 4. BUILD PARTICIPANTS
+
+        Set<User> participants = new HashSet<>();
+
+        // Add "other users" sent by frontend
+        for (Long id : participantIds) {
+            participants.add(userService.getUserEntityById(id));
+        }
+
+        // ALWAYS add current user exactly once
+        participants.add(currentUser);
+
+        chatRoom.setParticipants(participants);
+
+        // 5. SAVE & RETURN
+
+        ChatRoom saved = chatRoomRepository.save(chatRoom);
+        return mapToDTO(saved, currentUser);
+    }
+
 
     @Transactional(readOnly = true)
     public ChatRoomDTO getChatRoomById(Long chatRoomId, Long userId) {

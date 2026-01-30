@@ -12,8 +12,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
-
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import java.util.List;
+
 
 @RestController
 @RequestMapping("/api/messages")
@@ -22,13 +23,17 @@ public class MessageController {
     private final MessageService messageService;
     private final UserService userService;
     private final FileStorageService fileStorageService;
+    private final SimpMessagingTemplate messagingTemplate; // <--- NEW FIELD
 
+    // Updated Constructor
     public MessageController(MessageService messageService,
-                            UserService userService,
-                            FileStorageService fileStorageService) {
+                             UserService userService,
+                             FileStorageService fileStorageService,
+                             SimpMessagingTemplate messagingTemplate) { // <--- INJECT HERE
         this.messageService = messageService;
         this.userService = userService;
         this.fileStorageService = fileStorageService;
+        this.messagingTemplate = messagingTemplate;
     }
 
     @PostMapping
@@ -37,8 +42,15 @@ public class MessageController {
             Authentication authentication) {
         String email = authentication.getName();
         UserDTO currentUser = userService.getUserByEmail(email);
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(messageService.sendMessage(dto, currentUser.getId()));
+
+        // 1. Save to DB
+        MessageDTO savedMessage = messageService.sendMessage(dto, currentUser.getId());
+
+        // 2. BROADCAST to WebSocket Subscribers! (The Missing Link)
+        // This pushes the message to everyone listening to /topic/chatroom/{id}
+        messagingTemplate.convertAndSend("/topic/chatroom/" + dto.getChatRoomId(), savedMessage);
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(savedMessage);
     }
 
     @GetMapping("/chatroom/{chatRoomId}")
@@ -105,11 +117,14 @@ public class MessageController {
             @RequestParam("content") String content,
             @RequestParam("file") MultipartFile file,
             Authentication authentication) {
+
         String email = authentication.getName();
         UserDTO currentUser = userService.getUserByEmail(email);
 
+        // 1. Upload File
         FileUploadResponseDTO uploadResponse = fileStorageService.uploadFile(file);
 
+        // 2. Prepare DTO
         SendMessageDTO dto = new SendMessageDTO();
         dto.setChatRoomId(chatRoomId);
         dto.setContent(content);
@@ -117,8 +132,14 @@ public class MessageController {
         dto.setFileUrl(uploadResponse.getFileUrl());
         dto.setFileName(uploadResponse.getFileName());
 
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(messageService.sendMessage(dto, currentUser.getId()));
+        // 3. Save to DB (Capture the result!)
+        MessageDTO savedMessage = messageService.sendMessage(dto, currentUser.getId());
+
+        // 4. BROADCAST to WebSocket (The Critical Fix)
+        messagingTemplate.convertAndSend("/topic/chatroom/" + chatRoomId, savedMessage);
+
+        // 5. Return response
+        return ResponseEntity.status(HttpStatus.CREATED).body(savedMessage);
     }
 
     private boolean isImage(String contentType) {

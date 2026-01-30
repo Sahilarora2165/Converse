@@ -1,20 +1,16 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import LoadingSpinner from './Common/LoadingSpinner';
+// import LoadingSpinner from './Common/LoadingSpinner'; // Ensure this path is correct
 
 const PrivateRoute = ({ children }) => {
-  const { isAuthenticated, loading } = useAuth();
+  const { user, loading } = useAuth(); // Change isAuthenticated to user
   const location = useLocation();
 
   if (loading) {
-    return (
-      <div className="h-screen flex items-center justify-center">
-        <LoadingSpinner size="xl" />
-      </div>
-    );
+    return <div>Loading...</div>;
   }
 
-  if (!isAuthenticated) {
+  if (!user) { // Check if user exists
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 

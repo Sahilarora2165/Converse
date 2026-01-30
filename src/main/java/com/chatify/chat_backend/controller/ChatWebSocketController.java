@@ -57,6 +57,32 @@ public class ChatWebSocketController {
         );
     }
 
+
+    @MessageMapping("/chat/{roomId}/sendMessage")
+    public void sendMessage(
+            @DestinationVariable Long roomId,
+            @Payload SendMessageDTO sendMessageDTO,
+            Principal principal
+    ) {
+        if (principal == null) {
+            System.out.println("Principal is null - Message rejected");
+            return;
+        }
+
+        // 1. Identify the Sender
+        String email = principal.getName();
+        User user = userService.getUserEntityByEmail(email);
+
+        // 2. Enforce the Room ID from the URL path
+        sendMessageDTO.setChatRoomId(roomId);
+
+        // 3. Persist the Message (Save to DB)
+        MessageDTO savedMessage = messageService.sendMessage(sendMessageDTO, user.getId());
+
+        // 4. Broadcast to Subscribers (The critical step!)
+        messagingTemplate.convertAndSend("/topic/chatroom/" + roomId, savedMessage);
+    }
+
     @MessageMapping("/chat.typing/{chatRoomId}")
     public void handleTyping(@DestinationVariable Long chatRoomId,
                             @Payload TypingStatusDTO typingStatus,

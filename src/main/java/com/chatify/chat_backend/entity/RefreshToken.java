@@ -20,10 +20,9 @@ public class RefreshToken {
     @Column(nullable = false , unique = true)
     private String token;
 
-    @OneToOne
-    @JoinColumn(name = "user_id", referencedColumnName = "id")
-    // The foreign key user_id in the refresh_tokens table references the id column in the users table
-    private User user;
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user; //// The foreign key user_id in the refresh_tokens table references the id column in the users table
 
     @Column(nullable = false)
     private Instant expiryDate;

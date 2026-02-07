@@ -24,6 +24,18 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
     fetchRooms();
   }, [setRooms]);
 
+  // Clear unread count when opening a chat
+  useEffect(() => {
+    if (!chatId) return;
+
+    // Clear unread count for the active chat immediately
+    setRooms(prev => prev.map(r =>
+      String(r.id) === String(chatId)
+        ? { ...r, unreadCount: 0 }
+        : r
+    ));
+  }, [chatId, setRooms]);
+
   // Subscribe to all rooms for real-time updates
   useEffect(() => {
     if (!isConnected || !subscribeToRoom) return;
@@ -40,12 +52,16 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
               lastMessage: message.content,
               lastMessageTimestamp: message.timestamp,
               lastMessageSenderId: message.senderId,
-              lastMessageSenderName: message.senderName || 'Unknown'
+              // FIX: Use senderUsername from your MessageDTO, not senderName
+              lastMessageSenderName: message.senderUsername || 'Unknown'
             };
 
             // Only increment unread if not viewing this chat
             if (String(room.id) !== String(chatId)) {
               updatedRoom.unreadCount = (r.unreadCount || 0) + 1;
+            } else {
+              // If viewing this chat, keep unread at 0
+              updatedRoom.unreadCount = 0;
             }
 
             return updatedRoom;
@@ -91,7 +107,7 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
 
     // For group chats, show sender name (or "You:")
     if (room.isGroupChat) {
-      const prefix = isSentByMe ? 'You: ' : `${room.lastMessageSenderName}: `;
+      const prefix = isSentByMe ? 'You: ' : `${room.lastMessageSenderName || 'Unknown'}: `;
       return prefix + truncatedMessage;
     }
 
@@ -180,7 +196,7 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
               {channels.map(room => {
                 const unread = room.unreadCount || 0;
                 const isActive = chatId === String(room.id);
-                const hasUnread = unread > 0;
+                const hasUnread = unread > 0 && !isActive; // Don't show badge if active
                 const lastMessagePreview = getLastMessagePreview(room);
                 const timestamp = formatTimestamp(room.lastMessageTimestamp);
 
@@ -202,7 +218,7 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
                     {/* Channel Info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-baseline justify-between">
-                        <p className={`text-sm font-semibold truncate ${hasUnread && !isActive ? "text-white" : ""}`}>
+                        <p className={`text-sm font-semibold truncate ${hasUnread ? "text-white" : ""}`}>
                           {room.name}
                         </p>
                         {timestamp && (
@@ -225,7 +241,7 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
                     </div>
 
                     {/* Unread Badge */}
-                    {hasUnread && !isActive && (
+                    {hasUnread && (
                       <div className="ml-2 bg-blue-600 text-white text-[10px] font-black rounded-full px-2 py-0.5 min-w-5 text-center flex-shrink-0 self-start mt-0.5">
                         {unread > 99 ? "99+" : unread}
                       </div>
@@ -247,7 +263,7 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
             {directMessages.map(room => {
               const unread = room.unreadCount || 0;
               const isActive = chatId === String(room.id);
-              const hasUnread = unread > 0;
+              const hasUnread = unread > 0 && !isActive; // Don't show badge if active
               const displayName = getDisplayName(room);
               const otherUser = getOtherUser(room);
               const isOnline = otherUser ? onlineUsers.has(otherUser.id) : false;
@@ -282,7 +298,7 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
                   {/* User Info */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-baseline justify-between">
-                      <p className={`text-sm font-semibold truncate ${hasUnread && !isActive ? "text-white" : ""}`}>
+                      <p className={`text-sm font-semibold truncate ${hasUnread ? "text-white" : ""}`}>
                         {displayName}
                       </p>
                       {timestamp && (
@@ -305,7 +321,7 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
                   </div>
 
                   {/* Unread Badge */}
-                  {hasUnread && !isActive && (
+                  {hasUnread && (
                     <div className="ml-2 bg-blue-600 text-white text-[10px] font-black rounded-full px-2 py-0.5 min-w-5 text-center flex-shrink-0 self-start mt-0.5">
                       {unread > 99 ? "99+" : unread}
                     </div>

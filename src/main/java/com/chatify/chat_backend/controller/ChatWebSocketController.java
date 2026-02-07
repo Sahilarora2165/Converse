@@ -83,33 +83,33 @@ public class ChatWebSocketController {
         messagingTemplate.convertAndSend("/topic/chatroom/" + roomId, savedMessage);
     }
 
-    @MessageMapping("/chat.typing/{chatRoomId}")
-    public void handleTyping(@DestinationVariable Long chatRoomId,
-                            @Payload TypingStatusDTO typingStatus,
-                            Principal principal) {
-        if (principal == null) {
-            return;
-        }
-
-        String email = principal.getName();
-        User user = userService.getUserEntityByEmail(email);
-
-        if (!chatRoomService.isUserInChatRoom(chatRoomId, user.getId())) {
-            return;
-        }
-
-        TypingStatusDTO statusDTO = new TypingStatusDTO(
-                user.getId(),
-                user.getUsername(),
-                chatRoomId,
-                typingStatus.isTyping()
-        );
-
-        messagingTemplate.convertAndSend(
-                "/topic/chatroom/" + chatRoomId + "/typing",
-                statusDTO
-        );
-    }
+//    @MessageMapping("/chat.typing/{chatRoomId}")
+//    public void handleTyping(@DestinationVariable Long chatRoomId,
+//                            @Payload TypingStatusDTO typingStatus,
+//                            Principal principal) {
+//        if (principal == null) {
+//            return;
+//        }
+//
+//        String email = principal.getName();
+//        User user = userService.getUserEntityByEmail(email);
+//
+//        if (!chatRoomService.isUserInChatRoom(chatRoomId, user.getId())) {
+//            return;
+//        }
+//
+//        TypingStatusDTO statusDTO = new TypingStatusDTO(
+//                user.getId(),
+//                user.getUsername(),
+//                chatRoomId,
+//                typingStatus.isTyping()
+//        );
+//
+//        messagingTemplate.convertAndSend(
+//                "/topic/chatroom/" + chatRoomId + "/typing",
+//                statusDTO
+//        );
+//    }
 
     @MessageMapping("/chat.read/{messageId}")
     public void handleReadReceipt(@DestinationVariable Long messageId, Principal principal) {

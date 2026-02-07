@@ -71,7 +71,7 @@ public class AuthService {
             authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(email, password));
             String accessToken = jwtUtil.generateToken(user.getEmail());
             String refreshToken = generateRefreshToken(user);
-            return new AuthResponseDTO(accessToken, refreshToken, user.getUsername(),user.getEmail());
+            return new AuthResponseDTO(accessToken, refreshToken, user.getUsername(), user.getEmail(), user.getId());
         } catch (AuthenticationException e) {
             throw new RuntimeException("Invalid email or password", e);
         }
@@ -96,7 +96,8 @@ public class AuthService {
                     refreshTokenRepository.delete(refreshToken);
                     String accessToken = jwtUtil.generateToken(user.getEmail()); // Changed from user.getUsername()
                     String newRefreshToken = generateRefreshToken(user);
-                    return new AuthResponseDTO(accessToken, newRefreshToken, user.getUsername(), user.getEmail());
+                    return new AuthResponseDTO(accessToken, newRefreshToken, user.getUsername(), user.getEmail(),
+                            user.getId());
                 })
                 .orElseThrow(() -> new RuntimeException("Refresh token not found"));
     }

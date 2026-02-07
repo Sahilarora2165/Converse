@@ -1,5 +1,6 @@
 package com.chatify.chat_backend.entity;
 
+import com.chatify.chat_backend.entity.enums.MessageStatus;
 import com.chatify.chat_backend.entity.enums.MessageType;
 import jakarta.persistence.*;
 import lombok.*;
@@ -55,6 +56,13 @@ public class Message {
     )
     private Set<User> readBy = new HashSet<>();
 
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private boolean delivered = false;
+    private MessageStatus status;
+
+    @Column
+    private LocalDateTime deliveredAt;
+
+    @Column
+    private LocalDateTime seenAt;
 }

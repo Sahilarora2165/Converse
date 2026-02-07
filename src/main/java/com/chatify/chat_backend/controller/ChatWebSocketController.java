@@ -170,4 +170,59 @@ public class ChatWebSocketController {
         User user = userService.getUserEntityByEmail(email);
         presenceService.userDisconnected(user.getId());
     }
+
+    @MessageMapping("/chat.delivered")
+    public void handleDeliveredAck(
+            @Payload MessageDeliveredAckDTO ack,
+            Principal principal
+    ) {
+        if (principal == null) {
+            return;
+        }
+
+        String email = principal.getName();
+        User user = userService.getUserEntityByEmail(email);
+
+        MessageDeliveryUpdateDTO update =
+                messageService.markMessagesAsDelivered(
+                        ack.getChatRoomId(),
+                        user.getId(),
+                        ack.getLastDeliveredMessageId()
+                );
+
+        if (update != null) {
+            messagingTemplate.convertAndSend(
+                    "/topic/chatroom/" + ack.getChatRoomId() + "/delivery",
+                    update
+            );
+        }
+    }
+
+    @MessageMapping("/chat.seen")
+    public void handleSeenAck(
+            @Payload MessageSeenAckDTO ack,
+            Principal principal
+    ) {
+        if (principal == null) {
+            return;
+        }
+
+        String email = principal.getName();
+        User user = userService.getUserEntityByEmail(email);
+
+        MessageDeliveryUpdateDTO update =
+                messageService.markMessagesAsSeen(
+                        ack.getChatRoomId(),
+                        user.getId(),
+                        ack.getLastSeenMessageId()
+                );
+
+        if (update != null) {
+            messagingTemplate.convertAndSend(
+                    "/topic/chatroom/" + ack.getChatRoomId() + "/seen",
+                    update
+            );
+        }
+    }
+
 }

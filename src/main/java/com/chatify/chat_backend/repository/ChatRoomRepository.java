@@ -4,7 +4,7 @@ import com.chatify.chat_backend.entity.ChatRoom;
 import com.chatify.chat_backend.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
+import org.springframework.data.repository.query.Param; // Ensure this is imported
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -25,10 +25,9 @@ public interface ChatRoomRepository extends JpaRepository<ChatRoom, Long> {
     HAVING COUNT(DISTINCT p.id) = 2
     """)
     Optional<ChatRoom> findExistingPrivateChat(
-            Long userId1,
-            Long userId2
+            @Param("userId1") Long userId1, // Added @Param here
+            @Param("userId2") Long userId2  // Added @Param here
     );
-
 
     List<ChatRoom> findByIsGroupChatTrue();
 

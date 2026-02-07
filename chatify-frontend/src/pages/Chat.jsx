@@ -2,13 +2,14 @@ import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import useAuth from "../hooks/useAuth";
 import useWebSocket from "../hooks/useWebSocket";
-import { getChatRooms, getChatHistory, sendMessageAPI } from "../services/api";
+import { getChatRooms, getChatHistory } from "../services/api";
+import api from "../services/api";
 import NewChatModal from "../components/NewChatModal";
 import ChatSidebar from "../components/ChatSidebar";
 
 const Chat = () => {
   const { user, logout } = useAuth();
-  const { subscribeToRoom, isConnected } = useWebSocket();
+  const { subscribeToRoom, sendMessage, isConnected } = useWebSocket();
   const { chatId } = useParams();
   const navigate = useNavigate();
 
@@ -20,141 +21,141 @@ const Chat = () => {
   const messagesEndRef = useRef(null);
   const subscriptionRef = useRef(null);
 
-  const currentRoom = rooms.find(r => String(r.id) === chatId);
+  const currentRoom = rooms.find(r => String(r.id) === String(chatId));
 
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  // Reusable rooms fetch
+  const fetchRooms = async () => {
+    try {
+      const { data } = await getChatRooms();
+      setRooms(data);
+    } catch (err) {
+      console.error("Failed to fetch rooms", err);
+    }
+  };
+
+  // Initial load
   useEffect(() => {
-    const fetchRooms = async () => {
-      try {
-        const { data } = await getChatRooms();
-        setRooms(data);
-      } catch (err) {
-        console.error("Failed to fetch rooms", err);
-      }
-    };
     fetchRooms();
   }, []);
 
+  // Chat load + subscription + mark-all-read
   useEffect(() => {
-    if (!currentRoom) return;
+    if (!chatId) return;
 
     if (subscriptionRef.current) {
       subscriptionRef.current.unsubscribe();
+      subscriptionRef.current = null;
     }
 
     setMessages([]);
 
-    const loadRoom = async () => {
+    const loadChat = async () => {
       try {
-        const { data } = await getChatHistory(currentRoom.id);
+        const { data } = await getChatHistory(chatId);
         setMessages(data);
+        setTimeout(scrollToBottom, 50);
 
-        if (isConnected) {
-          subscriptionRef.current = subscribeToRoom(
-            currentRoom.id,
-            (incomingMsg) => {
-              setMessages(prev => [...prev, incomingMsg]);
-            }
-          );
+        // MARK ALL AS READ + REFRESH SIDEBAR
+        try {
+          await api.put(`/messages/chatroom/${chatId}/read-all`);
+          await fetchRooms();  // Immediate badge clear
+        } catch (err) {
+          console.error("Failed to mark all as read", err);
         }
+
+        subscriptionRef.current = subscribeToRoom(chatId, (message) => {
+          setMessages((prev) => {
+            if (prev.some(m => m.id === message.id)) return prev;
+            return [...prev, message];
+          });
+          setTimeout(scrollToBottom, 10);
+        });
       } catch (err) {
-        console.error("Failed to load chat room", err);
+        console.error("Failed to load chat", err);
       }
     };
 
-    loadRoom();
+    loadChat();
 
     return () => {
       if (subscriptionRef.current) {
         subscriptionRef.current.unsubscribe();
       }
     };
-  }, [chatId, isConnected]);
+  }, [chatId, subscribeToRoom]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    scrollToBottom();
   }, [messages]);
 
-  const handleSend = async (e) => {
+  const handleSendMessage = (e) => {
     e.preventDefault();
-    if (!newMessage.trim() || !currentRoom) return;
+    if (!newMessage.trim() || !chatId) return;
 
-    try {
-      await sendMessageAPI({
-        content: newMessage,
-        chatRoomId: currentRoom.id,
-        messageType: "TEXT",
-      });
-      setNewMessage("");
-    } catch (err) {
-      console.error("Failed to send message", err);
-    }
+    sendMessage(chatId, newMessage);
+    setNewMessage("");
+  };
+
+  const handleChatCreated = (newChat) => {
+    setRooms((prev) => {
+      if (prev.some(r => r.id === newChat.id)) return prev;
+      return [newChat, ...prev];
+    });
+    setShowNewChatModal(false);
+    navigate(`/chat/${newChat.id}`);
   };
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-200 overflow-hidden">
+    <div className="flex h-screen bg-slate-950 text-slate-200 font-sans overflow-hidden">
+      <ChatSidebar
+        rooms={rooms}
+        setRooms={setRooms}
+        onNewChat={() => setShowNewChatModal(true)}
+      />
 
-      {/* SIDEBAR */}
-      <ChatSidebar rooms={rooms} setRooms={setRooms} />
-
-      {/* MAIN CHAT AREA */}
-      <div className="flex-1 flex flex-col bg-slate-900/50">
-
-        {/* HEADER */}
-        <div className="h-16 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md flex justify-between items-center px-6">
-          <div className="flex flex-col">
-            <h2 className="font-bold text-sm tracking-tight text-white uppercase">
-              {currentRoom ? (currentRoom.isGroupChat ? `# ${currentRoom.name}` : `direct_message / ${currentRoom.name}`) : "Select a Node"}
-            </h2>
-            <div className="flex items-center gap-2">
-               <span className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]" : "bg-red-500"}`}></span>
-               <span className="text-[10px] text-slate-500 font-mono">{isConnected ? "SYSTEM_READY" : "CONNECTION_LOST"}</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => setShowNewChatModal(true)}
-              className="text-xs font-bold border border-slate-700 hover:border-blue-500 px-4 py-1.5 rounded transition-all"
-            >
-              + NEW COLLAB
-            </button>
-
-            <button
-              onClick={logout}
-              className="text-xs font-bold text-slate-500 hover:text-red-400 transition-colors"
-            >
-              TERMINATE_SESSION
-            </button>
-          </div>
-        </div>
-
-        {/* CONTENT */}
-        {currentRoom ? (
+      <div className="flex-1 flex flex-col relative bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black">
+        {chatId && currentRoom ? (
           <>
-            {/* MESSAGES */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-hide">
-              {messages.map((msg, index) => {
-                const isMe = msg.senderId === user.id;
+            {/* Header */}
+            <div className="p-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-bold tracking-widest uppercase text-white">
+                  {currentRoom.isGroupChat
+                    ? currentRoom.name
+                    : currentRoom.participants.find(p => String(p.id) !== String(user?.id))?.username || "Unknown"}
+                </h2>
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
+                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter">Secure Channel</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Messages - STABLE KEYS + FLAT SENDERID */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+              {messages.map((msg) => {
+                const isMe = String(msg.senderId) === String(user?.id);  // Flat senderId from DTO
+
                 return (
-                  <div key={index} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[70%] group`}>
-                      {!isMe && (
-                        <div className="text-[10px] font-mono mb-1 text-blue-400 uppercase tracking-widest">
-                          {msg.senderEmail.split('@')[0]}
-                        </div>
-                      )}
-                      <div
-                        className={`rounded-xl px-4 py-2.5 shadow-sm text-sm leading-relaxed ${
-                          isMe
-                            ? "bg-blue-600 text-white rounded-tr-none"
-                            : "bg-slate-800 text-slate-200 border border-slate-700 rounded-tl-none"
-                        }`}
-                      >
-                        {msg.content}
-                      </div>
-                      <div className={`text-[9px] mt-1 font-mono text-slate-500 ${isMe ? "text-right" : "text-left"}`}>
-                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      </div>
+                  <div
+                    key={msg.id}  // Stable, unique key
+                    className={`flex w-full mb-4 ${isMe ? "justify-end" : "justify-start"}`}
+                  >
+                    <div
+                      className={`max-w-[70%] p-3 rounded-2xl shadow-sm ${
+                        isMe
+                          ? "bg-blue-600 text-white rounded-tr-none"
+                          : "bg-slate-800 text-slate-100 rounded-tl-none border border-slate-700"
+                      }`}
+                    >
+                      <p className="text-sm">{msg.content}</p>
+                      <span className="text-[10px] opacity-50 block mt-1 text-right">
+                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
                     </div>
                   </div>
                 );
@@ -162,20 +163,20 @@ const Chat = () => {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* INPUT */}
-            <div className="p-4 bg-slate-900 border-t border-slate-800">
-              <form onSubmit={handleSend} className="flex gap-3 max-w-5xl mx-auto">
+            {/* Input */}
+            <div className="p-4 bg-slate-900/50 border-t border-slate-800">
+              <form onSubmit={handleSendMessage} className="flex space-x-3 max-w-5xl mx-auto">
                 <input
                   type="text"
-                  className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 transition-all placeholder:text-slate-600"
-                  placeholder={`Message ${currentRoom.name}...`}
+                  className="flex-1 bg-slate-950 border border-slate-800 text-slate-200 text-sm rounded-xl px-4 py-3 focus:outline-none focus:border-blue-500 transition-all"
+                  placeholder="Type a message..."
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
                 />
                 <button
                   type="submit"
                   disabled={!isConnected || !newMessage.trim()}
-                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 rounded-lg text-xs tracking-widest disabled:opacity-30 transition-all shadow-lg shadow-blue-900/20"
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 rounded-xl text-xs tracking-widest disabled:opacity-30 transition-all active:scale-95"
                 >
                   SEND
                 </button>
@@ -183,11 +184,9 @@ const Chat = () => {
             </div>
           </>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-slate-600 italic font-mono">
-            <div className="w-16 h-16 border-2 border-slate-800 rounded-full flex items-center justify-center mb-4 animate-pulse">
-               <span className="text-2xl not-italic">⚡</span>
-            </div>
-            <p className="text-xs uppercase tracking-[0.2em]">Awaiting Data Stream Selection</p>
+          <div className="flex-1 flex flex-col items-center justify-center text-slate-500">
+            <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mb-4 animate-pulse">📡</div>
+            <p className="text-xs font-bold tracking-widest uppercase">Select a conversation</p>
           </div>
         )}
       </div>
@@ -195,10 +194,7 @@ const Chat = () => {
       {showNewChatModal && (
         <NewChatModal
           onClose={() => setShowNewChatModal(false)}
-          onChatCreated={(newRoom) => {
-            setRooms(prev => [newRoom, ...prev]);
-            navigate(`/chat/${newRoom.id}`);
-          }}
+          onChatCreated={handleChatCreated}
         />
       )}
     </div>

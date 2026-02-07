@@ -26,4 +26,32 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
 
     @Query("SELECT COUNT(m) FROM Message m WHERE m.chatRoom = :chatRoom AND :user NOT MEMBER OF m.readBy")
     Long countUnreadMessagesByChatRoomAndUser(@Param("chatRoom") ChatRoom chatRoom, @Param("user") User user);
+
+    @Query("""
+    SELECT m FROM Message m
+    WHERE m.chatRoom = :chatRoom
+      AND m.sender <> :recipient
+      AND m.status = com.chatify.chat_backend.entity.enums.MessageStatus.SENT
+      AND m.id <= :lastMessageId
+""")
+    List<Message> findMessagesToDeliver(
+            @Param("chatRoom") ChatRoom chatRoom,
+            @Param("recipient") User recipient,
+            @Param("lastMessageId") Long lastMessageId
+    );
+
+    @Query("""
+    SELECT m FROM Message m
+    WHERE m.chatRoom = :chatRoom
+      AND m.sender <> :recipient
+      AND m.status = com.chatify.chat_backend.entity.enums.MessageStatus.DELIVERED
+      AND m.id <= :lastMessageId
+""")
+    List<Message> findMessagesToMarkSeen(
+            @Param("chatRoom") ChatRoom chatRoom,
+            @Param("recipient") User recipient,
+            @Param("lastMessageId") Long lastMessageId
+    );
+
+
 }

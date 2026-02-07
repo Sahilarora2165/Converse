@@ -1,10 +1,12 @@
 package com.chatify.chat_backend.service;
 
 import com.chatify.chat_backend.dto.MessageDTO;
+import com.chatify.chat_backend.dto.MessageDeliveryUpdateDTO;
 import com.chatify.chat_backend.dto.SendMessageDTO;
 import com.chatify.chat_backend.entity.ChatRoom;
 import com.chatify.chat_backend.entity.Message;
 import com.chatify.chat_backend.entity.User;
+import com.chatify.chat_backend.entity.enums.MessageStatus;
 import com.chatify.chat_backend.exception.ResourceNotFoundException;
 import com.chatify.chat_backend.exception.UnauthorizedException;
 import com.chatify.chat_backend.repository.MessageRepository;
@@ -14,6 +16,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -48,7 +51,12 @@ public class MessageService {
         message.setFileName(dto.getFileName());
         message.setSender(sender);
         message.setChatRoom(chatRoom);
-        message.setDelivered(true);
+        message.setStatus(MessageStatus.SENT);
+
+        // CRITICAL: Auto-mark as read by sender (own message never unread)
+        message.getReadBy().add(sender);
+        message.setStatus(MessageStatus.SEEN);  // Optional: Immediate SEEN for sender
+        message.setSeenAt(LocalDateTime.now());
 
         Message savedMessage = messageRepository.save(message);
         return mapToDTO(savedMessage);
@@ -108,11 +116,23 @@ public class MessageService {
             throw new UnauthorizedException("User is not a participant of this chat room");
         }
 
+        // Fetch all unread for this user (uses your existing query)
         List<Message> unreadMessages = messageRepository.findUnreadMessagesByChatRoomAndUser(chatRoom, user);
-        for (Message message : unreadMessages) {
-            message.getReadBy().add(user);
+
+        if (unreadMessages.isEmpty()) {
+            return;
         }
-        messageRepository.saveAll(unreadMessages);
+
+        LocalDateTime now = LocalDateTime.now();
+        for (Message message : unreadMessages) {
+            if (!message.getSender().getId().equals(userId)) {
+                message.getReadBy().add(user);
+                message.setStatus(MessageStatus.SEEN);
+                message.setSeenAt(now);
+            }
+        }
+
+        messageRepository.saveAll(unreadMessages);  // Bulk save
     }
 
     @Transactional
@@ -127,6 +147,85 @@ public class MessageService {
         messageRepository.delete(message);
     }
 
+    @Transactional
+    public MessageDeliveryUpdateDTO markMessagesAsDelivered(
+            Long chatRoomId,
+            Long recipientUserId,
+            Long lastDeliveredMessageId
+    ) {
+        User recipient = userService.getUserEntityById(recipientUserId);
+        ChatRoom chatRoom = chatRoomService.getChatRoomEntity(chatRoomId);
+
+        if (!chatRoom.getParticipants().contains(recipient)) {
+            throw new UnauthorizedException("User is not a participant of this chat room");
+        }
+
+        List<Message> messagesToUpdate =
+                messageRepository.findMessagesToDeliver(
+                        chatRoom,
+                        recipient,
+                        lastDeliveredMessageId
+                );
+
+        if (messagesToUpdate.isEmpty()) {
+            return null;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        for (Message message : messagesToUpdate) {
+            message.setStatus(MessageStatus.DELIVERED);
+            message.setDeliveredAt(now);
+        }
+
+        messageRepository.saveAll(messagesToUpdate);
+
+        return new MessageDeliveryUpdateDTO(
+                chatRoomId,
+                lastDeliveredMessageId
+        );
+    }
+
+
+    @Transactional
+    public MessageDeliveryUpdateDTO markMessagesAsSeen(
+            Long chatRoomId,
+            Long recipientUserId,
+            Long lastSeenMessageId
+    ) {
+        User recipient = userService.getUserEntityById(recipientUserId);
+        ChatRoom chatRoom = chatRoomService.getChatRoomEntity(chatRoomId);
+
+        if (!chatRoom.getParticipants().contains(recipient)) {
+            throw new UnauthorizedException("User is not a participant of this chat room");
+        }
+
+        List<Message> messagesToUpdate =
+                messageRepository.findMessagesToMarkSeen(
+                        chatRoom,
+                        recipient,
+                        lastSeenMessageId
+                );
+
+        if (messagesToUpdate.isEmpty()) {
+            return null;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        for (Message message : messagesToUpdate) {
+            message.setStatus(MessageStatus.SEEN);
+            message.setSeenAt(now);
+            message.getReadBy().add(recipient);
+        }
+
+        messageRepository.saveAll(messagesToUpdate);
+
+        return new MessageDeliveryUpdateDTO(
+                chatRoomId,
+                lastSeenMessageId
+        );
+    }
+
+
     public MessageDTO mapToDTO(Message message) {
         return new MessageDTO(
                 message.getId(),
@@ -139,7 +238,11 @@ public class MessageService {
                 message.getChatRoom().getId(),
                 message.getTimestamp(),
                 message.getReadBy().stream().map(User::getId).collect(Collectors.toSet()),
-                message.isDelivered()
+                message.getStatus()
+
         );
     }
+
+
+
 }

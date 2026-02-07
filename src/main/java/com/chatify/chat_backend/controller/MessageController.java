@@ -1,6 +1,7 @@
 package com.chatify.chat_backend.controller;
 
 import com.chatify.chat_backend.dto.*;
+import com.chatify.chat_backend.entity.User;
 import com.chatify.chat_backend.entity.enums.MessageType;
 import com.chatify.chat_backend.service.FileStorageService;
 import com.chatify.chat_backend.service.MessageService;
@@ -9,10 +10,14 @@ import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.messaging.handler.annotation.MessageMapping;
+import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+
+import java.security.Principal;
 import java.util.List;
 
 

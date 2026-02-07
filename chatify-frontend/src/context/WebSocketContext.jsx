@@ -1,4 +1,4 @@
-import React, { createContext, useRef, useEffect, useState } from 'react';
+import React, { createContext, useRef, useEffect, useState, useCallback } from 'react';
 import SockJS from 'sockjs-client';
 import Stomp from 'stompjs';
 import useAuth from '../hooks/useAuth';
@@ -47,24 +47,24 @@ export const WebSocketProvider = ({ children }) => {
     }, [token, user]);
 
     // Function to Subscribe to a specific Chat Room
-    const subscribeToRoom = (roomId, callback) => {
+    const subscribeToRoom = useCallback((roomId, callback) => {
         if (!stompClientRef.current || !isConnected) return null;
 
         return stompClientRef.current.subscribe(`/topic/chatroom/${roomId}`, (message) => {
             const parsedMessage = JSON.parse(message.body);
             callback(parsedMessage);
         });
-    };
+    }, [isConnected]);
 
     // Function to Send a Message
-    const sendMessage = (roomId, content) => {
+    const sendMessage = useCallback((roomId, content) => {
         if (stompClientRef.current && isConnected) {
             const payload = {
                 content: content,
                 chatRoomId: roomId
                 // Sender ID is handled by Backend via Token
             };
-            
+
             stompClientRef.current.send(
                 `/app/chat/${roomId}/sendMessage`,
                 {},
@@ -73,7 +73,7 @@ export const WebSocketProvider = ({ children }) => {
         } else {
             console.error("Cannot send message: WebSocket not connected");
         }
-    };
+    }, [isConnected]);
 
     return (
         <WebSocketContext.Provider value={{ isConnected, subscribeToRoom, sendMessage }}>

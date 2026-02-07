@@ -11,6 +11,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface MessageRepository extends JpaRepository<Message, Long> {
@@ -53,5 +54,7 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
             @Param("lastMessageId") Long lastMessageId
     );
 
+
+    Optional<Message> findTopByChatRoomOrderByTimestampDesc(ChatRoom chatRoom);
 
 }

@@ -4,6 +4,7 @@ import com.chatify.chat_backend.dto.ChatRoomDTO;
 import com.chatify.chat_backend.dto.CreateChatRequest;
 import com.chatify.chat_backend.dto.UserDTO;
 import com.chatify.chat_backend.entity.ChatRoom;
+import com.chatify.chat_backend.entity.Message;
 import com.chatify.chat_backend.entity.User;
 import com.chatify.chat_backend.exception.BadRequestException;
 import com.chatify.chat_backend.exception.ResourceNotFoundException;
@@ -13,6 +14,7 @@ import com.chatify.chat_backend.repository.MessageRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -177,14 +179,31 @@ public class ChatRoomService {
         return chatRoom.getParticipants().contains(user);
     }
 
+
     private ChatRoomDTO mapToDTO(ChatRoom chatRoom, User currentUser) {
         Set<UserDTO> participantDTOs = chatRoom.getParticipants().stream()
                 .map(userService::mapToDTO)
                 .collect(Collectors.toSet());
 
         UserDTO adminDTO = chatRoom.getAdmin() != null ? userService.mapToDTO(chatRoom.getAdmin()) : null;
-        
+
         Long unreadCount = messageRepository.countUnreadMessagesByChatRoomAndUser(chatRoom, currentUser);
+
+        // Fetch last message for preview
+        Optional<Message> lastMessageOpt = messageRepository.findTopByChatRoomOrderByTimestampDesc(chatRoom);
+
+        String lastMessageContent = null;
+        LocalDateTime lastMessageTime = null;
+        Long lastMessageSenderId = null;
+        String lastMessageSenderName = null;
+
+        if (lastMessageOpt.isPresent()) {
+            Message lastMsg = lastMessageOpt.get();
+            lastMessageContent = lastMsg.getContent();
+            lastMessageTime = lastMsg.getTimestamp();
+            lastMessageSenderId = lastMsg.getSender().getId();
+            lastMessageSenderName = lastMsg.getSender().getUsername();
+        }
 
         return new ChatRoomDTO(
                 chatRoom.getId(),
@@ -193,7 +212,12 @@ public class ChatRoomService {
                 participantDTOs,
                 adminDTO,
                 chatRoom.getCreatedAt(),
-                unreadCount
+                unreadCount,
+                lastMessageContent,
+                lastMessageTime,
+                lastMessageSenderId,
+                lastMessageSenderName
         );
     }
+
 }

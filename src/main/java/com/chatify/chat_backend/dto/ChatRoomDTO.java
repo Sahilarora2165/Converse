@@ -14,12 +14,18 @@ import java.util.Set;
 public class ChatRoomDTO {
     private Long id;
     private String name;
-    
+
     @JsonProperty("isGroupChat")
     private boolean isGroupChat;
-    
+
     private Set<UserDTO> participants;
     private UserDTO admin;
     private LocalDateTime createdAt;
     private Long unreadCount;
+
+    // Last Message Fields
+    private String lastMessage;
+    private LocalDateTime lastMessageTimestamp;
+    private Long lastMessageSenderId;
+    private String lastMessageSenderName;
 }

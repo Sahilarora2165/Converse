@@ -17,7 +17,6 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
     const fetchRooms = async () => {
       try {
         const { data } = await getChatRooms();
-        // Sort immediately after fetch (most recent first)
         const sorted = [...data].sort((a, b) => {
           const timeA = a.lastMessageTimestamp || a.createdAt;
           const timeB = b.lastMessageTimestamp || b.createdAt;
@@ -56,7 +55,7 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
     };
   }, [isConnected, rooms, subscribeToPresence, setRooms]);
 
-  // Reset unread count on chat select (optimistic UI update)
+  // Reset unread count on chat select
   useEffect(() => {
     if (!chatId) return;
     setRooms(prev => prev.map(r =>
@@ -87,7 +86,6 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
             return r;
           });
 
-          // Re-sort after update—bumps active chat to top
           return [...updated].sort((a, b) => {
             const timeA = a.lastMessageTimestamp || a.createdAt;
             const timeB = b.lastMessageTimestamp || b.createdAt;
@@ -101,7 +99,7 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
     return () => subscriptions.forEach(sub => sub?.unsubscribe());
   }, [isConnected, rooms.length, subscribeToRoom, chatId, setRooms]);
 
-  // Derived sorted + filtered rooms (stable reference, no re-render loops)
+  // Derived sorted + filtered rooms
   const sortedFilteredRooms = useMemo(() => {
     let filtered = rooms.filter(room => {
       if (activeTab === 'group') return room.isGroupChat;
@@ -109,7 +107,6 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
       return true;
     });
 
-    // Ensure sort on every render (fallback to createdAt)
     return [...filtered].sort((a, b) => {
       const timeA = a.lastMessageTimestamp || a.createdAt;
       const timeB = b.lastMessageTimestamp || b.createdAt;
@@ -118,16 +115,16 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
   }, [rooms, activeTab]);
 
   return (
-    <div className="w-80 h-full bg-slate-900 flex flex-col border-r border-white/5 shadow-2xl overflow-hidden">
+    <div className="w-80 h-full bg-gradient-to-b from-[#141414] via-[#0f0f0f] to-[#0a0a0a] flex flex-col border-r border-[#2a2a2a] shadow-2xl overflow-hidden">
       {/* HEADER */}
-      <div className="p-6 bg-slate-900/50 backdrop-blur-xl border-b border-white/5">
+      <div className="p-6 bg-gradient-to-r from-[#1a1a1a] to-[#141414] backdrop-blur-xl border-b border-[#2a2a2a]">
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-black text-white tracking-tighter italic">
-            CHATI<span className="text-indigo-500">FY</span>
+          <h1 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[#e8e8e8] to-[#c9a961] tracking-tighter italic">
+            CHATI<span className="text-[#c9a961]">FY</span>
           </h1>
           <button
             onClick={onNewChat}
-            className="p-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-all shadow-lg shadow-indigo-500/20 active:scale-95"
+            className="p-2.5 bg-gradient-to-br from-[#c9a961] via-[#b8955a] to-[#a8865a] hover:shadow-[0_0_20px_rgba(201,169,97,0.4)] text-[#0a0a0a] rounded-xl transition-all shadow-lg active:scale-95"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
@@ -136,13 +133,15 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
         </div>
 
         {/* TAB SYSTEM */}
-        <div className="flex p-1 bg-black/40 rounded-xl border border-white/5">
+        <div className="flex p-1 bg-[#0a0a0a]/60 rounded-xl border border-[#2a2a2a]">
           {['all', 'direct', 'group'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all ${
-                activeTab === tab ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'
+                activeTab === tab
+                  ? 'bg-gradient-to-r from-[#c9a961] to-[#a8865a] text-[#0a0a0a] shadow-lg'
+                  : 'text-[#6a6a6a] hover:text-[#c9a961]'
               }`}
             >
               {tab}
@@ -160,7 +159,6 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
 
           const isSelected = String(chatId) === String(room.id);
 
-          // Smart preview text with "You:" prefix
           let previewText = '';
           if (room.lastMessage) {
             if (room.lastMessageSenderId === currentUser?.id) {
@@ -180,20 +178,20 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
               onClick={() => navigate(`/chat/${room.id}`)}
               className={`group relative flex items-center gap-4 p-4 rounded-2xl cursor-pointer transition-all border ${
                 isSelected
-                  ? 'bg-indigo-600/10 border-indigo-500/50 shadow-inner'
-                  : 'hover:bg-white/5 border-transparent'
+                  ? 'bg-gradient-to-r from-[#1a1a1a] to-[#141414] border-[#c9a961]/30 shadow-[0_0_20px_rgba(201,169,97,0.1)]'
+                  : 'hover:bg-[#1a1a1a]/40 border-transparent'
               }`}
             >
               {/* AVATAR WITH STATUS DOT */}
               <div className="relative">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center text-white font-bold text-lg border border-white/10 shadow-lg group-hover:scale-105 transition-transform overflow-hidden">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] flex items-center justify-center text-[#c9a961] font-bold text-lg border border-[#3a3a3a] shadow-lg group-hover:scale-105 transition-transform overflow-hidden">
                   {room.isGroupChat ? room.name[0].toUpperCase() : (otherUser?.username?.[0].toUpperCase() || '?')}
                 </div>
 
                 {/* STATUS DOT */}
                 {!room.isGroupChat && otherUser && (
-                  <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-slate-900 shadow-sm transition-colors duration-500 ${
-                    otherUser.status === 'ONLINE' ? 'bg-emerald-500' : 'bg-slate-500'
+                  <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-[#0a0a0a] shadow-sm transition-colors duration-500 ${
+                    otherUser.status === 'ONLINE' ? 'bg-[#c9a961] shadow-[0_0_8px_rgba(201,169,97,0.6)]' : 'bg-[#4a4a4a]'
                   }`} />
                 )}
               </div>
@@ -201,23 +199,23 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-baseline mb-1">
                   <h3 className={`text-sm font-bold truncate transition-colors ${
-                    isSelected ? 'text-indigo-200' : 'text-slate-200'
+                    isSelected ? 'text-[#c9a961]' : 'text-[#e8e8e8]'
                   }`}>
                     {room.isGroupChat ? room.name : (otherUser?.username || 'Unknown User')}
                   </h3>
                   {room.lastMessageTimestamp && (
-                    <span className="text-[10px] text-slate-500 font-medium">
+                    <span className="text-[10px] text-[#6a6a6a] font-medium">
                       {new Date(room.lastMessageTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-slate-500 truncate font-medium">
+                <p className="text-xs text-[#6a6a6a] truncate font-medium">
                   {previewText}
                 </p>
               </div>
 
               {room.unreadCount > 0 && (
-                <div className="min-w-[20px] h-5 px-1.5 flex items-center justify-center bg-indigo-500 text-white text-[10px] font-black rounded-full shadow-lg shadow-indigo-500/40">
+                <div className="min-w-[20px] h-5 px-1.5 flex items-center justify-center bg-gradient-to-r from-[#c9a961] to-[#a8865a] text-[#0a0a0a] text-[10px] font-black rounded-full shadow-lg shadow-[#c9a961]/40">
                   {room.unreadCount}
                 </div>
               )}
@@ -227,18 +225,18 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
       </div>
 
       {/* FOOTER */}
-      <div className="p-5 bg-black/20 backdrop-blur-md border-t border-white/5">
-        <div className="flex items-center justify-between p-3 rounded-2xl bg-white/5 border border-white/5 hover:border-white/10 transition-all group">
+      <div className="p-5 bg-gradient-to-r from-[#1a1a1a] to-[#141414] backdrop-blur-md border-t border-[#2a2a2a]">
+        <div className="flex items-center justify-between p-3 rounded-2xl bg-[#0a0a0a]/60 border border-[#2a2a2a] hover:border-[#c9a961]/30 transition-all group">
           <div className="flex items-center gap-3">
             <div className="relative">
-               <div className={`w-3 h-3 rounded-full border-2 border-slate-900 ${isConnected ? 'bg-emerald-400' : 'bg-rose-500'}`}></div>
-               {isConnected && <div className="absolute inset-0 bg-emerald-400 rounded-full animate-ping opacity-75"></div>}
+               <div className={`w-3 h-3 rounded-full border-2 border-[#0a0a0a] ${isConnected ? 'bg-[#c9a961] shadow-[0_0_8px_rgba(201,169,97,0.6)]' : 'bg-[#8a4a4a]'}`}></div>
+               {isConnected && <div className="absolute inset-0 bg-[#c9a961] rounded-full animate-ping opacity-75"></div>}
             </div>
             <div className="flex flex-col">
-              <span className="text-sm font-bold text-white group-hover:text-indigo-200 transition-colors">
+              <span className="text-sm font-bold text-[#e8e8e8] group-hover:text-[#c9a961] transition-colors">
                 {currentUser?.username || 'User'}
               </span>
-              <span className="text-[10px] text-slate-500 uppercase tracking-widest">
+              <span className="text-[10px] text-[#6a6a6a] uppercase tracking-widest">
                 {isConnected ? 'Connected' : 'Reconnecting...'}
               </span>
             </div>
@@ -246,7 +244,7 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
 
           <button
             onClick={logout}
-            className="text-slate-500 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/10"
+            className="text-[#6a6a6a] hover:text-[#c9a961] transition-colors p-2 rounded-lg hover:bg-[#1a1a1a]/60"
             title="Sign Out"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

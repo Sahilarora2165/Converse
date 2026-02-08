@@ -21,7 +21,6 @@ export const WebSocketProvider = ({ children }) => {
             (frame) => {
                 setIsConnected(true);
                 stompClientRef.current = client;
-                // REMOVED: Global presence sub—no longer used.
             },
             (error) => {
                 setIsConnected(false);
@@ -44,10 +43,25 @@ export const WebSocketProvider = ({ children }) => {
         });
     }, [isConnected]);
 
-    // NEW: Dedicated presence sub per room.
     const subscribeToPresence = useCallback((roomId, callback) => {
         if (!stompClientRef.current || !isConnected) return null;
         return stompClientRef.current.subscribe(`/topic/chatroom/${roomId}/presence`, (msg) => {
+            callback(JSON.parse(msg.body));
+        });
+    }, [isConnected]);
+
+    // NEW: Subscribe to delivery status updates
+    const subscribeToDelivery = useCallback((roomId, callback) => {
+        if (!stompClientRef.current || !isConnected) return null;
+        return stompClientRef.current.subscribe(`/topic/chatroom/${roomId}/delivery`, (msg) => {
+            callback(JSON.parse(msg.body));
+        });
+    }, [isConnected]);
+
+    // NEW: Subscribe to seen status updates
+    const subscribeToSeen = useCallback((roomId, callback) => {
+        if (!stompClientRef.current || !isConnected) return null;
+        return stompClientRef.current.subscribe(`/topic/chatroom/${roomId}/seen`, (msg) => {
             callback(JSON.parse(msg.body));
         });
     }, [isConnected]);
@@ -58,8 +72,37 @@ export const WebSocketProvider = ({ children }) => {
         }
     }, []);
 
+    // NEW: Send delivery acknowledgment
+    const sendDeliveryAck = useCallback((chatRoomId, lastDeliveredMessageId) => {
+        if (stompClientRef.current?.connected) {
+            stompClientRef.current.send('/app/chat.delivered', {}, JSON.stringify({
+                chatRoomId,
+                lastDeliveredMessageId
+            }));
+        }
+    }, []);
+
+    // NEW: Send seen acknowledgment
+    const sendSeenAck = useCallback((chatRoomId, lastSeenMessageId) => {
+        if (stompClientRef.current?.connected) {
+            stompClientRef.current.send('/app/chat.seen', {}, JSON.stringify({
+                chatRoomId,
+                lastSeenMessageId
+            }));
+        }
+    }, []);
+
     return (
-        <WebSocketContext.Provider value={{ isConnected, subscribeToRoom, subscribeToPresence, sendMessage }}>
+        <WebSocketContext.Provider value={{
+            isConnected,
+            subscribeToRoom,
+            subscribeToPresence,
+            subscribeToDelivery,
+            subscribeToSeen,
+            sendMessage,
+            sendDeliveryAck,
+            sendSeenAck
+        }}>
             {children}
         </WebSocketContext.Provider>
     );

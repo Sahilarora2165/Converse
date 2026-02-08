@@ -10,12 +10,14 @@ import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.simp.SimpMessageSendingOperations;
+import org.springframework.security.access.prepost.PreAuthorize;  // NEW: Import for auth.
 import org.springframework.stereotype.Controller;
 
 import java.security.Principal;
 import java.time.LocalDateTime;
 
 @Controller
+@PreAuthorize("isAuthenticated()")  // NEW: Class-level auth—blocks anon on all mappings.
 public class ChatWebSocketController {
 
     private final SimpMessageSendingOperations messagingTemplate;
@@ -92,24 +94,6 @@ public class ChatWebSocketController {
 //        }
 //
 //        String email = principal.getName();
-//        User user = userService.getUserEntityByEmail(email);
-//
-//        if (!chatRoomService.isUserInChatRoom(chatRoomId, user.getId())) {
-//            return;
-//        }
-//
-//        TypingStatusDTO statusDTO = new TypingStatusDTO(
-//                user.getId(),
-//                user.getUsername(),
-//                chatRoomId,
-//                typingStatus.isTyping()
-//        );
-//
-//        messagingTemplate.convertAndSend(
-//                "/topic/chatroom/" + chatRoomId + "/typing",
-//                statusDTO
-//        );
-//    }
 
     @MessageMapping("/chat.read/{messageId}")
     public void handleReadReceipt(@DestinationVariable Long messageId, Principal principal) {
@@ -149,27 +133,7 @@ public class ChatWebSocketController {
         presenceService.broadcastPresenceChange(updatedStatus);
     }
 
-    @MessageMapping("/presence.connected")
-    public void userConnected(Principal principal) {
-        if (principal == null) {
-            return;
-        }
-
-        String email = principal.getName();
-        User user = userService.getUserEntityByEmail(email);
-        presenceService.userConnected(user.getId());
-    }
-
-    @MessageMapping("/presence.disconnected")
-    public void userDisconnected(Principal principal) {
-        if (principal == null) {
-            return;
-        }
-
-        String email = principal.getName();
-        User user = userService.getUserEntityByEmail(email);
-        presenceService.userDisconnected(user.getId());
-    }
+    // REMOVED: /presence.connected and /presence.disconnected—duplicates EventListener, causes double broadcasts.
 
     @MessageMapping("/chat.delivered")
     public void handleDeliveredAck(

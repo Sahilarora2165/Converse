@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getChatRooms } from "../services/api";
 import useAuth from '../hooks/useAuth';
@@ -8,15 +8,22 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
   const navigate = useNavigate();
   const { chatId } = useParams();
   const { user: currentUser, logout } = useAuth();
-  const { isConnected, subscribeToRoom } = useWebSocket();
-  const [onlineUsers, setOnlineUsers] = useState(new Set());
+  const { isConnected, subscribeToRoom, subscribeToPresence } = useWebSocket();
 
-  // Fetch rooms on mount
+  const [activeTab, setActiveTab] = useState('all');
+
+  // Initial rooms fetch + sort after load
   useEffect(() => {
     const fetchRooms = async () => {
       try {
         const { data } = await getChatRooms();
-        setRooms(data);
+        // Sort immediately after fetch (most recent first)
+        const sorted = [...data].sort((a, b) => {
+          const timeA = a.lastMessageTimestamp || a.createdAt;
+          const timeB = b.lastMessageTimestamp || b.createdAt;
+          return new Date(timeB) - new Date(timeA);
+        });
+        setRooms(sorted);
       } catch (err) {
         console.error("Failed to load chat rooms", err);
       }
@@ -24,350 +31,230 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
     fetchRooms();
   }, [setRooms]);
 
-  // Clear unread count when opening a chat
+  // Per-room presence subscriptions
+  useEffect(() => {
+    if (!isConnected || rooms.length === 0 || !subscribeToPresence) return;
+
+    const presenceSubs = rooms.map(room =>
+      subscribeToPresence(room.id, (presenceDTO) => {
+        setRooms(prevRooms => prevRooms.map(r => {
+          if (String(r.id) !== String(room.id)) return r;
+
+          const updatedParticipants = r.participants.map(p =>
+            p.id === presenceDTO.userId
+              ? { ...p, status: presenceDTO.status, lastSeen: presenceDTO.lastSeen }
+              : p
+          );
+
+          return { ...r, participants: updatedParticipants };
+        }));
+      })
+    );
+
+    return () => {
+      presenceSubs.forEach(sub => sub?.unsubscribe());
+    };
+  }, [isConnected, rooms, subscribeToPresence, setRooms]);
+
+  // Reset unread count on chat select (optimistic UI update)
   useEffect(() => {
     if (!chatId) return;
-
-    // Clear unread count for the active chat immediately
     setRooms(prev => prev.map(r =>
-      String(r.id) === String(chatId)
-        ? { ...r, unreadCount: 0 }
-        : r
+      String(r.id) === String(chatId) ? { ...r, unreadCount: 0 } : r
     ));
   }, [chatId, setRooms]);
 
-  // Subscribe to all rooms for real-time updates
+  // Message subscriptions + bump on new message
   useEffect(() => {
-    if (!isConnected || !subscribeToRoom) return;
+    if (!isConnected || !subscribeToRoom || rooms.length === 0) return;
 
     const subscriptions = [];
 
     rooms.forEach(room => {
       const sub = subscribeToRoom(room.id, (message) => {
-        setRooms(prev => prev.map(r => {
-          if (r.id === room.id) {
-            // Update last message preview
-            const updatedRoom = {
-              ...r,
-              lastMessage: message.content,
-              lastMessageTimestamp: message.timestamp,
-              lastMessageSenderId: message.senderId,
-              // FIX: Use senderUsername from your MessageDTO, not senderName
-              lastMessageSenderName: message.senderUsername || 'Unknown'
-            };
-
-            // Only increment unread if not viewing this chat
-            if (String(room.id) !== String(chatId)) {
-              updatedRoom.unreadCount = (r.unreadCount || 0) + 1;
-            } else {
-              // If viewing this chat, keep unread at 0
-              updatedRoom.unreadCount = 0;
+        setRooms(prev => {
+          const updated = prev.map(r => {
+            if (r.id === room.id) {
+              return {
+                ...r,
+                lastMessage: message.content,
+                lastMessageTimestamp: message.timestamp,
+                lastMessageSenderId: message.senderId,
+                lastMessageSenderName: message.senderName || 'Unknown',
+                unreadCount: String(chatId) === String(room.id) ? 0 : (r.unreadCount || 0) + 1
+              };
             }
+            return r;
+          });
 
-            return updatedRoom;
-          }
-          return r;
-        }));
+          // Re-sort after update—bumps active chat to top
+          return [...updated].sort((a, b) => {
+            const timeA = a.lastMessageTimestamp || a.createdAt;
+            const timeB = b.lastMessageTimestamp || b.createdAt;
+            return new Date(timeB) - new Date(timeA);
+          });
+        });
       });
-      if (sub) subscriptions.push(sub);
+      subscriptions.push(sub);
     });
 
-    return () => {
-      subscriptions.forEach(sub => sub?.unsubscribe?.());
-    };
-  }, [isConnected, rooms, chatId, subscribeToRoom, setRooms]);
+    return () => subscriptions.forEach(sub => sub?.unsubscribe());
+  }, [isConnected, rooms.length, subscribeToRoom, chatId, setRooms]);
 
-  // Helper: Get display name
-  const getDisplayName = useCallback((room) => {
-    if (room.isGroupChat) return room.name;
-    const otherUser = room.participants?.find(p => String(p.id) !== String(currentUser?.id));
-    return otherUser?.username || 'Unknown User';
-  }, [currentUser?.id]);
+  // Derived sorted + filtered rooms (stable reference, no re-render loops)
+  const sortedFilteredRooms = useMemo(() => {
+    let filtered = rooms.filter(room => {
+      if (activeTab === 'group') return room.isGroupChat;
+      if (activeTab === 'direct') return !room.isGroupChat;
+      return true;
+    });
 
-  // Helper: Get initials
-  const getInitials = useCallback((name) => {
-    return name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || '?';
-  }, []);
-
-  // Helper: Get other user for DM
-  const getOtherUser = useCallback((room) => {
-    if (room.isGroupChat) return null;
-    return room.participants?.find(p => String(p.id) !== String(currentUser?.id));
-  }, [currentUser?.id]);
-
-  // Helper: Format last message preview (WhatsApp style)
-  const getLastMessagePreview = useCallback((room) => {
-    if (!room.lastMessage) return null;
-
-    const isSentByMe = String(room.lastMessageSenderId) === String(currentUser?.id);
-    const maxLength = 35;
-    const truncatedMessage = room.lastMessage.length > maxLength
-      ? room.lastMessage.substring(0, maxLength) + '...'
-      : room.lastMessage;
-
-    // For group chats, show sender name (or "You:")
-    if (room.isGroupChat) {
-      const prefix = isSentByMe ? 'You: ' : `${room.lastMessageSenderName || 'Unknown'}: `;
-      return prefix + truncatedMessage;
-    }
-
-    // For DMs, just show "You:" if you sent it
-    return isSentByMe ? 'You: ' + truncatedMessage : truncatedMessage;
-  }, [currentUser?.id]);
-
-  // Helper: Format timestamp
-  const formatTimestamp = useCallback((timestamp) => {
-    if (!timestamp) return '';
-
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diffInHours = (now - date) / (1000 * 60 * 60);
-
-    if (diffInHours < 24) {
-      // Show time if today
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } else if (diffInHours < 168) {
-      // Show day of week if within a week
-      return date.toLocaleDateString([], { weekday: 'short' });
-    } else {
-      // Show date if older
-      return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-    }
-  }, []);
-
-  // Separate channels and DMs
-  const channels = rooms.filter(room => room.isGroupChat);
-  const directMessages = rooms.filter(room => !room.isGroupChat);
+    // Ensure sort on every render (fallback to createdAt)
+    return [...filtered].sort((a, b) => {
+      const timeA = a.lastMessageTimestamp || a.createdAt;
+      const timeB = b.lastMessageTimestamp || b.createdAt;
+      return new Date(timeB) - new Date(timeA);
+    });
+  }, [rooms, activeTab]);
 
   return (
-    <div className="w-80 flex-shrink-0 bg-slate-900 text-slate-300 flex flex-col h-screen border-r border-slate-800 font-sans">
+    <div className="w-80 h-full bg-slate-900 flex flex-col border-r border-white/5 shadow-2xl overflow-hidden">
+      {/* HEADER */}
+      <div className="p-6 bg-slate-900/50 backdrop-blur-xl border-b border-white/5">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-black text-white tracking-tighter italic">
+            CHATI<span className="text-indigo-500">FY</span>
+          </h1>
+          <button
+            onClick={onNewChat}
+            className="p-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-all shadow-lg shadow-indigo-500/20 active:scale-95"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+            </svg>
+          </button>
+        </div>
 
-      {/* HEADER - BRANDING */}
-      <div className="p-5 border-b border-slate-800 bg-slate-950">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-            <span className="text-white font-black text-lg">P</span>
-          </div>
-          <div>
-            <h1 className="font-black text-lg text-white tracking-tight">PULSE</h1>
-            <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Real-Time Infrastructure</p>
-          </div>
+        {/* TAB SYSTEM */}
+        <div className="flex p-1 bg-black/40 rounded-xl border border-white/5">
+          {['all', 'direct', 'group'].map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all ${
+                activeTab === tab ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* USER PROFILE SECTION */}
-      <div className="p-4 border-b border-slate-800 bg-slate-900/50">
-        <div className="flex items-center gap-3">
-          {/* User Avatar */}
-          <div className="relative">
-            <div className="w-10 h-10 bg-gradient-to-br from-slate-700 to-slate-600 rounded-full flex items-center justify-center text-sm font-bold text-white border-2 border-slate-700">
-              {getInitials(currentUser?.username || currentUser?.email)}
-            </div>
-            {/* Connection Status Dot */}
-            <span className={`absolute bottom-0 right-0 w-3 h-3 border-2 border-slate-900 rounded-full ${
-              isConnected ? 'bg-green-500' : 'bg-red-500'
-            }`}></span>
-          </div>
+      {/* ROOM LIST */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+        {sortedFilteredRooms.map((room) => {
+          const otherUser = !room.isGroupChat
+            ? room.participants.find(p => p.id !== currentUser?.id)
+            : null;
 
-          {/* User Info */}
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold text-white truncate">{currentUser?.username || 'User'}</p>
-            <div className="flex items-center gap-1.5">
-              <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-              <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wide">
-                {isConnected ? 'Connected' : 'Disconnected'}
+          const isSelected = String(chatId) === String(room.id);
+
+          // Smart preview text with "You:" prefix
+          let previewText = '';
+          if (room.lastMessage) {
+            if (room.lastMessageSenderId === currentUser?.id) {
+              previewText = `You: ${room.lastMessage}`;
+            } else if (room.isGroupChat) {
+              previewText = `${room.lastMessageSenderName || 'Unknown'}: ${room.lastMessage}`;
+            } else {
+              previewText = room.lastMessage;
+            }
+          } else {
+            previewText = otherUser?.status === 'ONLINE' ? 'Online' : 'Offline';
+          }
+
+          return (
+            <div
+              key={room.id}
+              onClick={() => navigate(`/chat/${room.id}`)}
+              className={`group relative flex items-center gap-4 p-4 rounded-2xl cursor-pointer transition-all border ${
+                isSelected
+                  ? 'bg-indigo-600/10 border-indigo-500/50 shadow-inner'
+                  : 'hover:bg-white/5 border-transparent'
+              }`}
+            >
+              {/* AVATAR WITH STATUS DOT */}
+              <div className="relative">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center text-white font-bold text-lg border border-white/10 shadow-lg group-hover:scale-105 transition-transform overflow-hidden">
+                  {room.isGroupChat ? room.name[0].toUpperCase() : (otherUser?.username?.[0].toUpperCase() || '?')}
+                </div>
+
+                {/* STATUS DOT */}
+                {!room.isGroupChat && otherUser && (
+                  <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-slate-900 shadow-sm transition-colors duration-500 ${
+                    otherUser.status === 'ONLINE' ? 'bg-emerald-500' : 'bg-slate-500'
+                  }`} />
+                )}
+              </div>
+
+              <div className="flex-1 min-w-0">
+                <div className="flex justify-between items-baseline mb-1">
+                  <h3 className={`text-sm font-bold truncate transition-colors ${
+                    isSelected ? 'text-indigo-200' : 'text-slate-200'
+                  }`}>
+                    {room.isGroupChat ? room.name : (otherUser?.username || 'Unknown User')}
+                  </h3>
+                  {room.lastMessageTimestamp && (
+                    <span className="text-[10px] text-slate-500 font-medium">
+                      {new Date(room.lastMessageTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 truncate font-medium">
+                  {previewText}
+                </p>
+              </div>
+
+              {room.unreadCount > 0 && (
+                <div className="min-w-[20px] h-5 px-1.5 flex items-center justify-center bg-indigo-500 text-white text-[10px] font-black rounded-full shadow-lg shadow-indigo-500/40">
+                  {room.unreadCount}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* FOOTER */}
+      <div className="p-5 bg-black/20 backdrop-blur-md border-t border-white/5">
+        <div className="flex items-center justify-between p-3 rounded-2xl bg-white/5 border border-white/5 hover:border-white/10 transition-all group">
+          <div className="flex items-center gap-3">
+            <div className="relative">
+               <div className={`w-3 h-3 rounded-full border-2 border-slate-900 ${isConnected ? 'bg-emerald-400' : 'bg-rose-500'}`}></div>
+               {isConnected && <div className="absolute inset-0 bg-emerald-400 rounded-full animate-ping opacity-75"></div>}
+            </div>
+            <div className="flex flex-col">
+              <span className="text-sm font-bold text-white group-hover:text-indigo-200 transition-colors">
+                {currentUser?.username || 'User'}
+              </span>
+              <span className="text-[10px] text-slate-500 uppercase tracking-widest">
+                {isConnected ? 'Connected' : 'Reconnecting...'}
               </span>
             </div>
           </div>
+
+          <button
+            onClick={logout}
+            className="text-slate-500 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/10"
+            title="Sign Out"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+          </button>
         </div>
       </div>
-
-      {/* SCROLLABLE CHAT LIST */}
-      <div className="overflow-y-auto flex-1 p-3 space-y-6 custom-scrollbar">
-
-        {/* CHANNELS SECTION */}
-        {channels.length > 0 && (
-          <div>
-            <div className="flex items-center justify-between px-2 mb-2">
-              <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Channels</h2>
-              <span className="text-[9px] font-bold text-slate-600">{channels.length}</span>
-            </div>
-            <div className="space-y-0.5">
-              {channels.map(room => {
-                const unread = room.unreadCount || 0;
-                const isActive = chatId === String(room.id);
-                const hasUnread = unread > 0 && !isActive; // Don't show badge if active
-                const lastMessagePreview = getLastMessagePreview(room);
-                const timestamp = formatTimestamp(room.lastMessageTimestamp);
-
-                return (
-                  <div
-                    key={room.id}
-                    onClick={() => navigate(`/chat/${room.id}`)}
-                    className={`group relative flex items-start px-3 py-2.5 rounded-lg cursor-pointer transition-all ${
-                      isActive
-                        ? "bg-blue-600 text-white"
-                        : "hover:bg-slate-800/60 text-slate-400"
-                    }`}
-                  >
-                    {/* Channel Icon */}
-                    <div className={`mr-3 text-base mt-0.5 ${isActive ? "text-blue-200" : "text-slate-600 group-hover:text-slate-400"}`}>
-                      #
-                    </div>
-
-                    {/* Channel Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline justify-between">
-                        <p className={`text-sm font-semibold truncate ${hasUnread ? "text-white" : ""}`}>
-                          {room.name}
-                        </p>
-                        {timestamp && (
-                          <span className={`text-[10px] ml-2 flex-shrink-0 ${
-                            isActive ? 'text-blue-200' : hasUnread ? 'text-blue-400' : 'text-slate-500'
-                          }`}>
-                            {timestamp}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Last Message Preview */}
-                      {lastMessagePreview && (
-                        <p className={`text-[11px] truncate mt-0.5 ${
-                          isActive ? 'text-blue-100' : hasUnread ? 'text-white' : 'text-slate-500'
-                        }`}>
-                          {lastMessagePreview}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Unread Badge */}
-                    {hasUnread && (
-                      <div className="ml-2 bg-blue-600 text-white text-[10px] font-black rounded-full px-2 py-0.5 min-w-5 text-center flex-shrink-0 self-start mt-0.5">
-                        {unread > 99 ? "99+" : unread}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* DIRECT MESSAGES SECTION */}
-        <div>
-          <div className="flex items-center justify-between px-2 mb-2">
-            <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Direct Messages</h2>
-            <span className="text-[9px] font-bold text-slate-600">{directMessages.length}</span>
-          </div>
-          <div className="space-y-0.5">
-            {directMessages.map(room => {
-              const unread = room.unreadCount || 0;
-              const isActive = chatId === String(room.id);
-              const hasUnread = unread > 0 && !isActive; // Don't show badge if active
-              const displayName = getDisplayName(room);
-              const otherUser = getOtherUser(room);
-              const isOnline = otherUser ? onlineUsers.has(otherUser.id) : false;
-              const lastMessagePreview = getLastMessagePreview(room);
-              const timestamp = formatTimestamp(room.lastMessageTimestamp);
-
-              return (
-                <div
-                  key={room.id}
-                  onClick={() => navigate(`/chat/${room.id}`)}
-                  className={`group relative flex items-start px-3 py-2.5 rounded-lg cursor-pointer transition-all ${
-                    isActive
-                      ? "bg-blue-600 text-white"
-                      : "hover:bg-slate-800/60 text-slate-400"
-                  }`}
-                >
-                  {/* User Avatar with Online Status */}
-                  <div className="relative mr-3 flex-shrink-0 mt-0.5">
-                    <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold ${
-                      isActive
-                        ? "bg-blue-700 text-white"
-                        : "bg-slate-700 text-white"
-                    }`}>
-                      {getInitials(displayName)}
-                    </div>
-                    {/* Online indicator */}
-                    {isOnline && (
-                      <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-slate-900 rounded-full"></span>
-                    )}
-                  </div>
-
-                  {/* User Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-baseline justify-between">
-                      <p className={`text-sm font-semibold truncate ${hasUnread ? "text-white" : ""}`}>
-                        {displayName}
-                      </p>
-                      {timestamp && (
-                        <span className={`text-[10px] ml-2 flex-shrink-0 ${
-                          isActive ? 'text-blue-200' : hasUnread ? 'text-blue-400' : 'text-slate-500'
-                        }`}>
-                          {timestamp}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Last Message Preview */}
-                    {lastMessagePreview && (
-                      <p className={`text-[11px] truncate mt-0.5 ${
-                        isActive ? 'text-blue-100' : hasUnread ? 'text-white' : 'text-slate-500'
-                      }`}>
-                        {lastMessagePreview}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Unread Badge */}
-                  {hasUnread && (
-                    <div className="ml-2 bg-blue-600 text-white text-[10px] font-black rounded-full px-2 py-0.5 min-w-5 text-center flex-shrink-0 self-start mt-0.5">
-                      {unread > 99 ? "99+" : unread}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            {directMessages.length === 0 && (
-              <p className="px-3 py-2 text-xs text-slate-600 italic">No conversations yet</p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* FOOTER - ACTIONS */}
-      <div className="p-3 bg-slate-950 border-t border-slate-800 space-y-2">
-        <button
-          onClick={onNewChat}
-          className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-black rounded-lg transition-all uppercase tracking-wider active:scale-95"
-        >
-          + New Chat
-        </button>
-        <button
-          onClick={logout}
-          className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-[10px] font-bold rounded-lg transition-all uppercase tracking-wider"
-        >
-          Logout
-        </button>
-      </div>
-
-      {/* Custom Scrollbar Styles */}
-      <style jsx>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 6px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: rgb(15 23 42);
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: rgb(51 65 85);
-          border-radius: 3px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: rgb(71 85 105);
-        }
-      `}</style>
     </div>
   );
 };

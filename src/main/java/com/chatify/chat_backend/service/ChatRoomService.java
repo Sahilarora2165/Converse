@@ -6,14 +6,17 @@ import com.chatify.chat_backend.dto.UserDTO;
 import com.chatify.chat_backend.entity.ChatRoom;
 import com.chatify.chat_backend.entity.Message;
 import com.chatify.chat_backend.entity.User;
+import com.chatify.chat_backend.entity.UserChatState;
 import com.chatify.chat_backend.exception.BadRequestException;
 import com.chatify.chat_backend.exception.ResourceNotFoundException;
 import com.chatify.chat_backend.exception.UnauthorizedException;
 import com.chatify.chat_backend.repository.ChatRoomRepository;
 import com.chatify.chat_backend.repository.MessageRepository;
+import com.chatify.chat_backend.repository.UserChatStateRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
@@ -27,13 +30,16 @@ public class ChatRoomService {
     private final ChatRoomRepository chatRoomRepository;
     private final MessageRepository messageRepository;
     private final UserService userService;
+    private final UserChatStateRepository userChatStateRepository; // FIX 1: Added missing field
 
     public ChatRoomService(ChatRoomRepository chatRoomRepository,
                            MessageRepository messageRepository,
-                           UserService userService) {
+                           UserService userService,
+                           UserChatStateRepository userChatStateRepository) { // FIX 1: Injected via constructor
         this.chatRoomRepository = chatRoomRepository;
         this.messageRepository = messageRepository;
         this.userService = userService;
+        this.userChatStateRepository = userChatStateRepository;
     }
 
 
@@ -86,13 +92,10 @@ public class ChatRoomService {
     @Transactional(readOnly = true)
     public List<Long> getChatRoomIdsForUser(Long userId) {
         if (userId == null) {
-            return List.of();  // Defensive guard—prevents NPE on invalid calls.
+            return List.of();
         }
-        // FIXED: Use exact repo method name returning List<Long> directly.
         return chatRoomRepository.findChatRoomIdsByParticipantId(userId);
     }
-
-
 
     @Transactional
     public ChatRoomDTO createChatRoom(
@@ -103,34 +106,22 @@ public class ChatRoomService {
     ) {
         User currentUser = userService.getUserEntityById(currentUserId);
 
-        // 1. VALIDATION (IMPORTANT)
-
         if (!isGroupChat && participantIds.size() != 1) {
-            throw new BadRequestException(
-                    "Private chat must have exactly one other participant"
-            );
+            throw new BadRequestException("Private chat must have exactly one other participant");
         }
 
         if (isGroupChat && participantIds.isEmpty()) {
-            throw new BadRequestException(
-                    "Group chat must have at least one participant"
-            );
+            throw new BadRequestException("Group chat must have at least one participant");
         }
-
-        // 2. CHECK EXISTING PRIVATE CHAT
 
         if (!isGroupChat) {
             Long otherUserId = participantIds.get(0);
-
             Optional<ChatRoom> existing =
                     chatRoomRepository.findExistingPrivateChat(currentUserId, otherUserId);
-
             if (existing.isPresent()) {
                 return mapToDTO(existing.get(), currentUser);
             }
         }
-
-        // 3. CREATE NEW CHAT ROOM
 
         ChatRoom chatRoom = new ChatRoom();
         chatRoom.setGroupChat(isGroupChat);
@@ -140,29 +131,19 @@ public class ChatRoomService {
             chatRoom.setAdmin(currentUser);
         } else {
             chatRoom.setName("Private Chat");
-            chatRoom.setAdmin(null); // private chats have no admin
+            chatRoom.setAdmin(null);
         }
 
-        // 4. BUILD PARTICIPANTS
-
         Set<User> participants = new HashSet<>();
-
-        // Add "other users" sent by frontend
         for (Long id : participantIds) {
             participants.add(userService.getUserEntityById(id));
         }
-
-        // ALWAYS add current user exactly once
         participants.add(currentUser);
-
         chatRoom.setParticipants(participants);
-
-        // 5. SAVE & RETURN
 
         ChatRoom saved = chatRoomRepository.save(chatRoom);
         return mapToDTO(saved, currentUser);
     }
-
 
     @Transactional(readOnly = true)
     public ChatRoomDTO getChatRoomById(Long chatRoomId, Long userId) {
@@ -188,6 +169,30 @@ public class ChatRoomService {
         return chatRoom.getParticipants().contains(user);
     }
 
+    @Transactional
+    public void markChatAsRead(Long chatRoomId, User user) {
+        ChatRoom chatRoom = chatRoomRepository.findById(chatRoomId)
+                .orElseThrow(() -> new RuntimeException("Chat not found"));
+
+        Message lastMessage = messageRepository
+                .findTopByChatRoomOrderByTimestampDesc(chatRoom)
+                .orElse(null);
+
+        UserChatState state = userChatStateRepository
+                .findByUserIdAndChatRoomId(user.getId(), chatRoomId)
+                .orElseGet(() -> {
+                    UserChatState s = new UserChatState();
+                    s.setUser(user);
+                    s.setChatRoom(chatRoom);
+                    return s;
+                });
+
+        if (lastMessage != null) {
+            state.setLastReadMessage(lastMessage);
+            state.setLastReadAt(Instant.now());
+            userChatStateRepository.save(state);
+        }
+    }
 
     private ChatRoomDTO mapToDTO(ChatRoom chatRoom, User currentUser) {
         Set<UserDTO> participantDTOs = chatRoom.getParticipants().stream()
@@ -198,7 +203,6 @@ public class ChatRoomService {
 
         Long unreadCount = messageRepository.countUnreadMessagesByChatRoomAndUser(chatRoom, currentUser);
 
-        // Fetch last message for preview
         Optional<Message> lastMessageOpt = messageRepository.findTopByChatRoomOrderByTimestampDesc(chatRoom);
 
         String lastMessageContent = null;
@@ -228,5 +232,4 @@ public class ChatRoomService {
                 lastMessageSenderName
         );
     }
-
 }

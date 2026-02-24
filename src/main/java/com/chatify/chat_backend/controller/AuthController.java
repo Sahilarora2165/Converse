@@ -3,11 +3,14 @@ package com.chatify.chat_backend.controller;
 import com.chatify.chat_backend.dto.AuthResponseDTO;
 import com.chatify.chat_backend.dto.UserLoginDTO;
 import com.chatify.chat_backend.dto.UserRegistrationDTO;
+import com.chatify.chat_backend.entity.User;
 import com.chatify.chat_backend.service.AuthService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import com.chatify.chat_backend.security.JwtUtil;
-
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
+import com.chatify.chat_backend.repository.UserRepository;
 import java.util.Map;
 
 @RestController
@@ -16,11 +19,26 @@ public class AuthController {
 
     private final AuthService authService;
     private final JwtUtil jwtUtil; //
+    private final UserRepository userRepository;
 
-    public AuthController(AuthService authService, JwtUtil jwtUtil){ // ✅ Inject JwtUtil
+    public AuthController(AuthService authService, JwtUtil jwtUtil, UserRepository userRepository){ // ✅ Inject JwtUtil
         this.authService = authService;
         this.jwtUtil = jwtUtil;
+        this.userRepository = userRepository;
     }
+
+    @GetMapping("/me")
+    public ResponseEntity<?> getCurrentUser(@AuthenticationPrincipal UserDetails userDetails) {
+        if (userDetails == null) {
+            return ResponseEntity.status(401).body("Not authenticated");
+        }
+        User user = userRepository.findByEmail(userDetails.getUsername())
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        return ResponseEntity.ok(
+                new AuthResponseDTO(null, null, user.getUsername(), user.getEmail(), user.getId())
+        );
+    }
+
 
     // Register a new user
     @PostMapping("/register")

@@ -5,6 +5,8 @@ import com.chatify.chat_backend.repository.UserRepository;
 import com.chatify.chat_backend.service.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.core.user.OAuth2User;
@@ -17,6 +19,8 @@ import java.nio.charset.StandardCharsets;
 
 @Component
 public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(OAuth2SuccessHandler.class);
 
     private final AuthService authService;
     private final UserRepository userRepository;
@@ -40,14 +44,21 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
         String googleId = oAuth2User.getAttribute("sub");
         String picture  = oAuth2User.getAttribute("picture");
 
+        if (email == null) {
+            log.error("OAuth2 login failed: email attribute is null");
+            getRedirectStrategy().sendRedirect(request, response, redirectUri + "?error=oauth2_email_missing");
+            return;
+        }
+
         String token = authService.loginOrRegisterOAuthUser(email, name, googleId, picture);
 
-        // Fetch saved user to get id and username
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("User not found after OAuth"));
 
+        // Use URL fragment (#) instead of query string (?) so the token is NOT sent to the server
+        // in subsequent requests and does NOT appear in server access logs
         String redirectUrl = redirectUri
-                + "?token=" + token
+                + "#token=" + token
                 + "&id=" + user.getId()
                 + "&username=" + URLEncoder.encode(user.getUsername(), StandardCharsets.UTF_8)
                 + "&email=" + URLEncoder.encode(user.getEmail(), StandardCharsets.UTF_8);

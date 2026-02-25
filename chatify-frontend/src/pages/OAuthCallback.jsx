@@ -7,7 +7,11 @@ const OAuthCallback = () => {
     const { login } = useAuth();
 
     useEffect(() => {
-        const params = new URLSearchParams(window.location.search);
+        // Parse from URL fragment (#) instead of query string (?)
+        // Fragment is never sent to the server — more secure for tokens
+        const hash = window.location.hash.substring(1); // Remove the leading '#'
+        const params = new URLSearchParams(hash);
+
         const token    = params.get('token');
         const id       = params.get('id');
         const username = params.get('username');
@@ -26,9 +30,13 @@ const OAuthCallback = () => {
         };
 
         login(userData, token);
+
+        // Clear the fragment from the URL to remove the token from browser history
+        window.history.replaceState(null, '', window.location.pathname);
+
         navigate('/chat');
 
-    }, []);
+    }, [login, navigate]);
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-black">

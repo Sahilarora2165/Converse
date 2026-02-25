@@ -1,9 +1,7 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 
-// 1. ADD 'export' HERE
 export const AuthContext = createContext(null);
 
-// 2. Export the hook
 export const useAuth = () => {
     return useContext(AuthContext);
 };
@@ -14,11 +12,17 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const storedUser = localStorage.getItem('user');
-        const storedToken = localStorage.getItem('token');
-        if (storedUser && storedToken) {
-            setUser(JSON.parse(storedUser));
-            setToken(storedToken);
+        try {
+            const storedUser = localStorage.getItem('user');
+            const storedToken = localStorage.getItem('token');
+            if (storedUser && storedToken) {
+                setUser(JSON.parse(storedUser));
+                setToken(storedToken);
+            }
+        } catch (e) {
+            // Corrupted localStorage data — clear and start fresh
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
         }
         setLoading(false);
     }, []);
@@ -37,7 +41,6 @@ export const AuthProvider = ({ children }) => {
         localStorage.removeItem('user');
     };
 
-    // Note: Added 'isAuthenticated' for PrivateRoute compatibility
     return (
         <AuthContext.Provider value={{ user, token, login, logout, loading, isAuthenticated: !!user }}>
             {children}

@@ -1,10 +1,8 @@
 import axios from 'axios';
-
-// Ensure this matches your Spring Boot port
-const API_URL = '/api';
+import { API_URL } from '../utils/constants';
 
 const api = axios.create({
-    baseURL: API_URL,
+    baseURL: `${API_URL}/api`,
     headers: {
         'Content-Type': 'application/json',
     },
@@ -26,11 +24,14 @@ api.interceptors.request.use(
 api.interceptors.response.use(
     (response) => response,
     (error) => {
-        if (error.response && (error.response.status === 401 || error.response.status === 403)) {
-            // Token likely expired - force logout (optional: clear storage)
+        const isAuthEndpoint = error.config?.url?.startsWith('/auth/');
+        const status = error.response?.status;
+
+        // Only force-logout on 401/403 for non-auth endpoints
+        // (auth endpoints like /login already handle their own errors)
+        if ((status === 401 || status === 403) && !isAuthEndpoint) {
             localStorage.removeItem('token');
             localStorage.removeItem('user');
-            // Redirect to login if not already there
             if (window.location.pathname !== '/login') {
                 window.location.href = '/login';
             }
@@ -44,19 +45,17 @@ export const loginAPI = (email, password) => api.post('/auth/login', { email, pa
 export const registerAPI = (userData) => api.post('/auth/register', userData);
 
 export const getChatRooms = () => api.get('/chatrooms');
-
-// Matches MessageController.java: @RequestMapping("/api/messages") + @GetMapping("/chatroom/{chatRoomId}")
 export const getChatHistory = (roomId) => api.get(`/messages/chatroom/${roomId}`);
 export const searchUsers = (query) => api.get(`/chatrooms/search?query=${query}`);
 
 export const createChatRoom = (name, isGroup, participantIds) =>
     api.post('/chatrooms', {
         name,
-        isGroupChat: isGroup, // Backend expects "isGroupChat"
+        isGroupChat: isGroup,
         participantIds
     });
 
 export const sendMessageAPI = (messageData) => api.post('/messages', messageData);
-// Helper to get all users (useful for starting new chats)
 export const getAllUsers = () => api.get('/users');
+
 export default api;

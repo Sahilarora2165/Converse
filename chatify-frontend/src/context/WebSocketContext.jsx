@@ -2,6 +2,7 @@ import React, { createContext, useRef, useEffect, useState, useCallback } from '
 import SockJS from 'sockjs-client';
 import Stomp from 'stompjs';
 import useAuth from '../hooks/useAuth';
+import { WS_URL } from '../utils/constants';
 
 export const WebSocketContext = createContext(null);
 
@@ -13,7 +14,7 @@ export const WebSocketProvider = ({ children }) => {
     useEffect(() => {
         if (!token || !user) return;
 
-        const socket = new SockJS('http://localhost:8080/ws');
+        const socket = new SockJS(WS_URL);
         const client = Stomp.over(socket);
 
         client.connect(
@@ -50,7 +51,7 @@ export const WebSocketProvider = ({ children }) => {
         });
     }, [isConnected]);
 
-    // NEW: Subscribe to delivery status updates
+    // Subscribe to delivery status updates
     const subscribeToDelivery = useCallback((roomId, callback) => {
         if (!stompClientRef.current || !isConnected) return null;
         return stompClientRef.current.subscribe(`/topic/chatroom/${roomId}/delivery`, (msg) => {
@@ -58,7 +59,7 @@ export const WebSocketProvider = ({ children }) => {
         });
     }, [isConnected]);
 
-    // NEW: Subscribe to seen status updates
+    // Subscribe to seen status updates
     const subscribeToSeen = useCallback((roomId, callback) => {
         if (!stompClientRef.current || !isConnected) return null;
         return stompClientRef.current.subscribe(`/topic/chatroom/${roomId}/seen`, (msg) => {
@@ -72,7 +73,7 @@ export const WebSocketProvider = ({ children }) => {
         }
     }, []);
 
-    // NEW: Send delivery acknowledgment
+    // Send delivery acknowledgment
     const sendDeliveryAck = useCallback((chatRoomId, lastDeliveredMessageId) => {
         if (stompClientRef.current?.connected) {
             stompClientRef.current.send('/app/chat.delivered', {}, JSON.stringify({
@@ -82,7 +83,7 @@ export const WebSocketProvider = ({ children }) => {
         }
     }, []);
 
-    // NEW: Send seen acknowledgment
+    // Send seen acknowledgment
     const sendSeenAck = useCallback((chatRoomId, lastSeenMessageId) => {
         if (stompClientRef.current?.connected) {
             stompClientRef.current.send('/app/chat.seen', {}, JSON.stringify({

@@ -1,6 +1,8 @@
 package com.chatify.chat_backend.config;
 
 import com.chatify.chat_backend.security.JwtUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -27,6 +29,8 @@ import java.util.List;
 @Order(Ordered.HIGHEST_PRECEDENCE + 99)
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
+    private static final Logger log = LoggerFactory.getLogger(WebSocketConfig.class);
+
     private final JwtUtil jwtUtil;
 
     @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:5173}")
@@ -39,23 +43,23 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws")
-                .setAllowedOrigins(allowedOrigins.split(","))  // Tightened CORS.
+                .setAllowedOrigins(allowedOrigins.split(","))
                 .withSockJS();
     }
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
         registry.enableSimpleBroker("/topic", "/user")
-                .setHeartbeatValue(new long[]{10000, 10000})  // 10s server/client pings.
-                .setTaskScheduler(heartbeatScheduler());  // NEW: Explicit scheduler to satisfy SimpleBroker requirement.
+                .setHeartbeatValue(new long[]{10000, 10000})
+                .setTaskScheduler(heartbeatScheduler());
         registry.setApplicationDestinationPrefixes("/app");
         registry.setUserDestinationPrefix("/user");
     }
 
     @Bean
-    public ThreadPoolTaskScheduler heartbeatScheduler() {  // NEW: Dedicated scheduler for heartbeats—fixes startup crash.
+    public ThreadPoolTaskScheduler heartbeatScheduler() {
         ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
-        scheduler.setPoolSize(2);  // Minimal pool—handles pings efficiently.
+        scheduler.setPoolSize(2);
         scheduler.setThreadNamePrefix("wss-heartbeat-");
         scheduler.initialize();
         return scheduler;
@@ -71,7 +75,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                 if (StompCommand.CONNECT.equals(accessor.getCommand())) {
                     String authHeader = accessor.getFirstNativeHeader("Authorization");
 
-                    System.out.println("WebSocket Connect Request Received");
+                    log.debug("WebSocket CONNECT request received");
 
                     if (authHeader != null && authHeader.toLowerCase().startsWith("bearer")) {
                         String token = authHeader.replace("Bearer", "").trim();
@@ -84,15 +88,15 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                                         new UsernamePasswordAuthenticationToken(email, null, List.of());
 
                                 accessor.setUser(auth);
-                                System.out.println("✅ WebSocket Authenticated User: " + email);
+                                log.debug("WebSocket authenticated user: {}", email);
                             } else {
-                                System.out.println("❌ Token Invalid");
+                                log.warn("WebSocket authentication failed: invalid token");
                             }
                         } catch (Exception e) {
-                            System.out.println("❌ Error parsing JWT in WebSocket: " + e.getMessage());
+                            log.warn("Error parsing JWT in WebSocket: {}", e.getMessage());
                         }
                     } else {
-                        System.out.println("⚠️ No Authorization Header found in WebSocket CONNECT frame");
+                        log.warn("No Authorization header found in WebSocket CONNECT frame");
                     }
                 }
                 return message;

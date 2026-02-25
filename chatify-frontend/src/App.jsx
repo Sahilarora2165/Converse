@@ -3,6 +3,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Chat from './pages/Chat';
+import OAuthCallback from './pages/OAuthCallback';
+import PrivateRoute from './components/PrivateRoute';
 
 function App() {
   return (
@@ -10,16 +12,16 @@ function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/oauth2/callback" element={<OAuthCallback />} />
 
         <Route path="/chat">
-          <Route index element={<Chat />} />
-          <Route path=":chatId" element={<Chat />} />
+          <Route index element={<PrivateRoute><Chat /></PrivateRoute>} />
+          <Route path=":chatId" element={<PrivateRoute><Chat /></PrivateRoute>} />
         </Route>
 
         <Route path="/" element={<Navigate to="/chat" replace />} />
       </Routes>
     </BrowserRouter>
-
   );
 }
 

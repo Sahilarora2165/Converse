@@ -8,6 +8,8 @@ import com.chatify.chat_backend.entity.User;
 import com.chatify.chat_backend.repository.RefreshTokenRepository;
 import com.chatify.chat_backend.repository.UserRepository;
 import com.chatify.chat_backend.security.JwtUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -18,21 +20,22 @@ import java.util.UUID;
 
 @Service
 public class AuthService {
+
+    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
+
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
 
-
     @Value("${app.jwt.refresh-token.expiration-ms}")
     private long refreshTokenExpirationMs;
 
-    // ✅ FIXED: Remove AuthenticationManager parameter
     public AuthService(
             UserRepository userRepository,
             RefreshTokenRepository refreshTokenRepository,
             PasswordEncoder passwordEncoder,
-            JwtUtil jwtUtil) {  // ← Removed authenticationManager
+            JwtUtil jwtUtil) {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordEncoder = passwordEncoder;
@@ -55,7 +58,6 @@ public class AuthService {
         return "User registered successfully";
     }
 
-    // ✅ FIXED: Remove authentication logic, just validate password manually
     @Transactional
     public AuthResponseDTO login(UserLoginDTO request) {
         String email = request.getEmail();
@@ -64,7 +66,6 @@ public class AuthService {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("Invalid email or password"));
 
-        // ✅ Manually verify password instead of using AuthenticationManager
         if (!passwordEncoder.matches(password, user.getPassword())) {
             throw new RuntimeException("Invalid email or password");
         }
@@ -112,7 +113,7 @@ public class AuthService {
     public void logout(String email) {
         userRepository.findByEmail(email).ifPresent(user -> {
             int deletedCount = refreshTokenRepository.deleteAllByUser(user);
-            System.out.println("Deleted " + deletedCount + " refresh tokens for user: " + email);
+            log.info("Deleted {} refresh tokens for user: {}", deletedCount, email);
         });
     }
 
@@ -129,10 +130,12 @@ public class AuthService {
             return userRepository.save(newUser);
         });
 
-        // If user exists but signed up locally, link their Google account
+        // If user exists but signed up locally, link Google ID without overwriting provider
         if ("local".equals(user.getProvider())) {
             user.setProviderId(googleId);
-            user.setProvider("google");
+            if (user.getProfilePicture() == null && picture != null) {
+                user.setProfilePicture(picture);
+            }
             userRepository.save(user);
         }
 

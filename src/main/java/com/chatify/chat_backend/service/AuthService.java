@@ -123,15 +123,16 @@ public class AuthService {
             User newUser = new User();
             newUser.setEmail(email);
             newUser.setUsername(generateUniqueUsername(name));
-            newUser.setPassword(null); // OAuth users have no password
+            newUser.setPassword(null);
             newUser.setProvider("google");
             newUser.setProviderId(googleId);
             newUser.setProfilePicture(picture);
             return userRepository.save(newUser);
         });
 
-        // If user exists but signed up locally, link Google ID without overwriting provider
+        // If user exists and signed up locally, link their Google account (one-time)
         if ("local".equals(user.getProvider())) {
+            user.setProvider("google_linked");
             user.setProviderId(googleId);
             if (user.getProfilePicture() == null && picture != null) {
                 user.setProfilePicture(picture);

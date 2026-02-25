@@ -116,11 +116,9 @@ const Chat = () => {
   useEffect(() => {
     const handleFocus = () => {
       isChatActiveRef.current = true;
-      console.log('[FOCUS] Chat is now active');
       if (chatId && messages.length > 0 && sendSeenAck) {
         const lastMessageId = messages[messages.length - 1]?.id;
         if (lastMessageId) {
-          console.log('[SEEN ACK] Sending on focus, messageId:', lastMessageId);
           sendSeenAck(parseInt(chatId), lastMessageId);
         }
       }
@@ -128,13 +126,11 @@ const Chat = () => {
 
     const handleBlur = () => {
       isChatActiveRef.current = false;
-      console.log('[BLUR] Chat is now inactive');
     };
 
     window.addEventListener('focus', handleFocus);
     window.addEventListener('blur', handleBlur);
     isChatActiveRef.current = true;
-    console.log('[INIT] Chat is active on mount');
 
     return () => {
       window.removeEventListener('focus', handleFocus);
@@ -162,14 +158,11 @@ const Chat = () => {
 
         // STEP 1: Load message history
         const { data } = await getChatHistory(chatId);
-        console.log('[HISTORY] Loaded', data?.length || 0, 'messages');
-        console.log('[HISTORY] Message statuses:', data?.map(m => ({ id: m.id, status: m.status, senderId: m.senderId })));
         setMessages(data || []);
         scrollToBottom('auto');
 
         // STEP 2: Mark all messages as read in backend
         await api.put(`/messages/chatroom/${chatId}/read-all`);
-        console.log('[READ] Marked all messages as read in backend');
 
         // STEP 3: Send delivery ACK ONLY for OTHER people's messages
         if (data && data.length > 0 && sendDeliveryAck) {
@@ -177,7 +170,6 @@ const Chat = () => {
           if (otherMessages.length > 0) {
             const lastOtherId = otherMessages[otherMessages.length - 1]?.id;
             if (lastOtherId) {
-              console.log('[DELIVERY ACK] Sending for history, lastId:', lastOtherId);
               sendDeliveryAck(parseInt(chatId), lastOtherId);
             }
           }
@@ -189,7 +181,6 @@ const Chat = () => {
           if (otherMessages.length > 0) {
             const lastOtherId = otherMessages[otherMessages.length - 1]?.id;
             if (lastOtherId) {
-              console.log('[SEEN ACK] Sending for history, lastId:', lastOtherId);
               sendSeenAck(parseInt(chatId), lastOtherId);
             }
           }
@@ -198,21 +189,17 @@ const Chat = () => {
         // STEP 5: Subscribe to new messages
         subscriptionRef.current?.unsubscribe();
         subscriptionRef.current = subscribeToRoom(chatId, (message) => {
-          console.log('[NEW MESSAGE] Received:', message);
-          console.log('[NEW MESSAGE] Status:', message.status, 'SenderId:', message.senderId, 'MyId:', user?.id);
 
           setMessages(prev => [...prev, message]);
           scrollToBottom();
 
           // Auto-send delivery ACK for incoming messages
           if (sendDeliveryAck && message.senderId !== user?.id) {
-            console.log('[DELIVERY ACK] Auto-sending for new message, id:', message.id);
             sendDeliveryAck(parseInt(chatId), message.id);
           }
 
           // Auto-send seen ACK if chat is active
           if (sendSeenAck && message.senderId !== user?.id && isChatActiveRef.current) {
-            console.log('[SEEN ACK] Auto-sending for new message, id:', message.id);
             sendSeenAck(parseInt(chatId), message.id);
           }
         });
@@ -220,10 +207,7 @@ const Chat = () => {
         // STEP 6: Subscribe to delivery status updates
         deliverySubRef.current?.unsubscribe();
         if (subscribeToDelivery) {
-          console.log('[SUBSCRIBE] Subscribing to delivery updates for room:', chatId);
           deliverySubRef.current = subscribeToDelivery(chatId, (update) => {
-            console.log('[DELIVERY UPDATE] Received:', update);
-            console.log('[DELIVERY UPDATE] Will update messages ≤', update.lastDeliveredMessageId);
 
             setMessages(prev => {
               const updated = prev.map(msg => {
@@ -250,10 +234,7 @@ const Chat = () => {
         // STEP 7: Subscribe to seen status updates
         seenSubRef.current?.unsubscribe();
         if (subscribeToSeen) {
-          console.log('[SUBSCRIBE] Subscribing to seen updates for room:', chatId);
           seenSubRef.current = subscribeToSeen(chatId, (update) => {
-            console.log('[SEEN UPDATE] Received:', update);
-            console.log('[SEEN UPDATE] Will update messages ≤', update.lastSeenMessageId);
 
             setMessages(prev => {
               const updated = prev.map(msg => {

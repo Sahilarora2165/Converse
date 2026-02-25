@@ -30,12 +30,12 @@ public class ChatRoomService {
     private final ChatRoomRepository chatRoomRepository;
     private final MessageRepository messageRepository;
     private final UserService userService;
-    private final UserChatStateRepository userChatStateRepository; // FIX 1: Added missing field
+    private final UserChatStateRepository userChatStateRepository;
 
     public ChatRoomService(ChatRoomRepository chatRoomRepository,
                            MessageRepository messageRepository,
                            UserService userService,
-                           UserChatStateRepository userChatStateRepository) { // FIX 1: Injected via constructor
+                           UserChatStateRepository userChatStateRepository) {
         this.chatRoomRepository = chatRoomRepository;
         this.messageRepository = messageRepository;
         this.userService = userService;
@@ -171,8 +171,7 @@ public class ChatRoomService {
 
     @Transactional
     public void markChatAsRead(Long chatRoomId, User user) {
-        ChatRoom chatRoom = chatRoomRepository.findById(chatRoomId)
-                .orElseThrow(() -> new RuntimeException("Chat not found"));
+        ChatRoom chatRoom = getChatRoomEntity(chatRoomId);
 
         Message lastMessage = messageRepository
                 .findTopByChatRoomOrderByTimestampDesc(chatRoom)

@@ -3,18 +3,14 @@ package com.chatify.chat_backend.controller;
 import com.chatify.chat_backend.dto.ChatRoomDTO;
 import com.chatify.chat_backend.dto.CreateChatRequest;
 import com.chatify.chat_backend.dto.UserDTO;
-import com.chatify.chat_backend.entity.ChatRoom;
-import com.chatify.chat_backend.entity.User;
-import com.chatify.chat_backend.exception.BadRequestException;
 import com.chatify.chat_backend.service.ChatRoomService;
 import com.chatify.chat_backend.service.UserService;
-import jakarta.validation.Valid;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.*;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
@@ -28,7 +24,6 @@ public class ChatRoomController {
         this.chatRoomService = chatRoomService;
         this.userService = userService;
     }
-
 
     @PostMapping
     public ResponseEntity<ChatRoomDTO> createChatRoom(
@@ -48,7 +43,6 @@ public class ChatRoomController {
         return ResponseEntity.ok(chatRoom);
     }
 
-
     @GetMapping
     public ResponseEntity<List<ChatRoomDTO>> getChatRoomsForUser(Authentication authentication) {
         String email = authentication.getName();
@@ -67,8 +61,9 @@ public class ChatRoomController {
 
     @GetMapping("/search")
     public ResponseEntity<List<UserDTO>> searchUsers(@RequestParam("query") String query) {
+        // TODO: Move filtering to database query (UserRepository) for production scale
+        // Current approach loads all users into memory — acceptable for MVP
         List<UserDTO> allUsers = userService.getAllUsers();
-
 
         List<UserDTO> filteredUsers = allUsers.stream()
                 .filter(user ->
@@ -87,7 +82,7 @@ public class ChatRoomController {
         String email = authentication.getName();
         UserDTO currentUser = userService.getUserByEmail(email);
         Long userId = request.get("userId");
-        
+
         if (userId == null) {
             return ResponseEntity.badRequest().build();
         }

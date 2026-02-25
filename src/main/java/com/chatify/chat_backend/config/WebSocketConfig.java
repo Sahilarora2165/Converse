@@ -2,6 +2,7 @@ package com.chatify.chat_backend.config;
 
 import com.chatify.chat_backend.security.JwtUtil;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -13,6 +14,7 @@ import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.messaging.support.MessageHeaderAccessor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
@@ -37,15 +39,26 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws")
-                .setAllowedOriginPatterns("*") // Allow all for testing
+                .setAllowedOrigins(allowedOrigins.split(","))  // Tightened CORS.
                 .withSockJS();
     }
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
-        registry.enableSimpleBroker("/topic", "/user");
+        registry.enableSimpleBroker("/topic", "/user")
+                .setHeartbeatValue(new long[]{10000, 10000})  // 10s server/client pings.
+                .setTaskScheduler(heartbeatScheduler());  // NEW: Explicit scheduler to satisfy SimpleBroker requirement.
         registry.setApplicationDestinationPrefixes("/app");
         registry.setUserDestinationPrefix("/user");
+    }
+
+    @Bean
+    public ThreadPoolTaskScheduler heartbeatScheduler() {  // NEW: Dedicated scheduler for heartbeats—fixes startup crash.
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(2);  // Minimal pool—handles pings efficiently.
+        scheduler.setThreadNamePrefix("wss-heartbeat-");
+        scheduler.initialize();
+        return scheduler;
     }
 
     @Override
@@ -58,7 +71,6 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                 if (StompCommand.CONNECT.equals(accessor.getCommand())) {
                     String authHeader = accessor.getFirstNativeHeader("Authorization");
 
-                    // DEBUG LOG
                     System.out.println("WebSocket Connect Request Received");
 
                     if (authHeader != null && authHeader.toLowerCase().startsWith("bearer")) {

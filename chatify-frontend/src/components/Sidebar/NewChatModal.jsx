@@ -1,128 +1,204 @@
-import { useState, useEffect, useCallback } from 'react';
-import { searchUsers, getAllUsers } from '../../api/users';
-import { createChatRoom } from '../../api/chatrooms';
-import { useAuth } from '../../context/AuthContext';
-import Avatar from '../Common/Avatar';
-import LoadingSpinner from '../Common/LoadingSpinner';
-import toast from 'react-hot-toast';
+import React, { useState, useEffect, useRef } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import useAuth from "../hooks/useAuth";
+import useWebSocket from "../hooks/useWebSocket";
+import { getChatRooms, getChatHistory, sendMessageAPI } from "../services/api";
+import NewChatModal from "../components/NewChatModal";
+import ChatSidebar from "../components/ChatSidebar";
 
-const NewChatModal = ({ onClose, onChatCreated }) => {
-  const { user } = useAuth();
-  const [users, setUsers] = useState([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [creating, setCreating] = useState(false);
+const Chat = () => {
+  const { user, logout } = useAuth();
+  const { subscribeToRoom, sendMessage, isConnected } = useWebSocket();
+  const { chatId } = useParams();
+  const navigate = useNavigate();
 
-  const loadUsers = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await getAllUsers();
-      // Filter out current user
-      setUsers(data.filter((u) => u.id !== user?.id));
-    } catch (error) {
-      console.error('Failed to load users:', error);
-      toast.error('Failed to load users');
-    } finally {
-      setLoading(false);
+  const [rooms, setRooms] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState("");
+  const [showNewChatModal, setShowNewChatModal] = useState(false);
+
+  const messagesEndRef = useRef(null);
+  const subscriptionRef = useRef(null);
+
+  const currentRoom = rooms.find(r => String(r.id) === String(chatId));
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  // Initial rooms fetch
+  useEffect(() => {
+    const fetchRooms = async () => {
+      try {
+        const { data } = await getChatRooms();
+        setRooms(data);
+      } catch (err) {
+        console.error("Failed to fetch rooms", err);
+      }
+    };
+    fetchRooms();
+  }, []);
+
+  // Chat-specific load + subscription
+  useEffect(() => {
+    if (!chatId) return;
+
+    if (subscriptionRef.current) {
+      subscriptionRef.current.unsubscribe();
+      subscriptionRef.current = null;
     }
-  }, [user?.id]);
+
+    setMessages([]);
+
+    const loadChat = async () => {
+      try {
+        const { data } = await getChatHistory(chatId);
+        setMessages(data);
+        setTimeout(scrollToBottom, 50);
+
+        subscriptionRef.current = subscribeToRoom(chatId, (message) => {
+          setMessages((prev) => {
+            if (prev.some(m => m.id === message.id)) return prev;
+            return [...prev, message];
+          });
+          setTimeout(scrollToBottom, 10);
+        });
+      } catch (err) {
+        console.error("Failed to load chat", err);
+      }
+    };
+
+    loadChat();
+
+    return () => {
+      if (subscriptionRef.current) {
+        subscriptionRef.current.unsubscribe();
+      }
+    };
+  }, [chatId, subscribeToRoom]);
 
   useEffect(() => {
-    loadUsers();
-  }, [loadUsers]);
+    scrollToBottom();
+  }, [messages]);
 
-  const handleSearch = async (query) => {
-    setSearchQuery(query);
-    if (!query.trim()) {
-      loadUsers();
-      return;
-    }
+  const handleSendMessage = async (e) => {
+    e.preventDefault();
+    if (!newMessage.trim() || !chatId) return;
 
-    setLoading(true);
     try {
-      const data = await searchUsers(query);
-      setUsers(data.filter((u) => u.id !== user?.id));
-    } catch (error) {
-      console.error('Failed to search users:', error);
-    } finally {
-      setLoading(false);
+      sendMessage(chatId, newMessage);
+      setNewMessage("");
+    } catch (err) {
+      console.error("Failed to send message", err);
     }
   };
 
-  const handleSelectUser = async (selectedUser) => {
-    setCreating(true);
-    try {
-      const chatRoom = await createChatRoom({
-        isGroupChat: false,
-        participantIds: [selectedUser.id],
-      });
-      toast.success(`Chat with ${selectedUser.username} created`);
-      onChatCreated(chatRoom);
-    } catch (error) {
-      console.error('Failed to create chat:', error);
-      toast.error('Failed to create chat');
-    } finally {
-      setCreating(false);
-    }
+  const handleChatCreated = (newChat) => {
+    setRooms((prev) => {
+      const exists = prev.find((r) => r.id === newChat.id);
+      if (exists) return prev;
+      return [newChat, ...prev];
+    });
+
+    setShowNewChatModal(false);
+    navigate(`/chat/${newChat.id}`);
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md m-4 overflow-hidden">
-        <div className="p-4 border-b flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-800">New Conversation</h2>
-          <button
-            onClick={onClose}
-            className="p-1 text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-100"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
+    <div className="flex h-screen bg-slate-950 text-slate-200 font-sans overflow-hidden">
+      <ChatSidebar
+        rooms={rooms}
+        setRooms={setRooms}
+        currentChatId={chatId}
+        onNewChat={() => setShowNewChatModal(true)}
+        user={user}
+        onLogout={logout}
+      />
 
-        <div className="p-4">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => handleSearch(e.target.value)}
-            placeholder="Search users..."
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-            autoFocus
-          />
-        </div>
+      <div className="flex-1 flex flex-col relative bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black">
+        {chatId && currentRoom ? (
+          <>
+            <div className="p-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-bold tracking-widest uppercase text-white">
+                  {currentRoom.isGroupChat
+                    ? currentRoom.name
+                    : currentRoom.participants.find(p => String(p.id) !== String(user?.id))?.username || "Unknown"}
+                </h2>
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span,span>
+                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter">Secure Channel</span>
+                </div>
+              </div>
+            </div>
 
-        <div className="max-h-80 overflow-y-auto">
-          {loading ? (
-            <div className="flex items-center justify-center h-32">
-              <LoadingSpinner size="md" />
-            </div>
-          ) : users.length === 0 ? (
-            <div className="flex items-center justify-center h-32 text-gray-500">
-              <p>No users found</p>
-            </div>
-          ) : (
-            <div className="divide-y">
-              {users.map((u) => (
-                <button
-                  key={u.id}
-                  onClick={() => handleSelectUser(u)}
-                  disabled={creating}
-                  className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left disabled:opacity-50"
-                >
-                  <Avatar user={u} size="md" showStatus isOnline={u.status === 'ONLINE'} />
-                  <div>
-                    <h3 className="font-medium text-gray-800">{u.username}</h3>
-                    <p className="text-sm text-gray-500">{u.email}</p>
+            {/* Message Area - FIXED ALIGNMENT + KEY + GROUP SENDER NAME */}
+            <div className="flex-1 overflow-yczki-auto p-6 space-y-4 custom-scrollbar">
+              {messages.map((msg) => {
+                const isMe = String(msg.sender?.id) === String(user?.id);
+
+                return (
+                  <div
+                    key={msg.id || msg.timestamp}  // Stable key prevents re-renders
+                    className={`flex w-full mb-4 ${isMe ? "justify-end" : "justify-start"}`}
+                  >
+                    <div
+                      className={`max-w-[70%] p-3 rounded-2xl shadow-sm ${
+                        isMe
+                          ? "bg-blue-600 text-white rounded-tr-none"
+                          : "bg-slate-800 text-slate-100 rounded-tl-none border border-slate-700"
+                      }`}
+                    >
+                      {/* Show sender name in group chats for non-owned messages */}
+                      {!isMe && currentRoom?.isGroupChat && msg.sender?.username && (
+                        <p className="text-xs opacity-70 mb-1">{msg.sender.username}</p>
+                      )}
+                      <p className="text-sm">{msg.content}</p>
+                      <span className="text-[10px] opacity-50 block mt-1 text-right">
+                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
                   </div>
-                </button>
-              ))}
+                );
+              })}
+              <div ref={messagesEndRef} />
             </div>
-          )}
-        </div>
+
+            <div className="p-4 bg-slate-900/50 border-t border-slate-800">
+              <form onSubmit={handleSendMessage} className="flex space-x-3 max-w-5xl mx-auto">
+                <input
+                  type="text"
+                  className="flex-1 bg-slate-950 border border-slate-800 text-slate-200 text-sm rounded-xl px-4 py-3 focus:outline-none focus:border-blue-500 transition-all"
+                  placeholder="Type a message..."
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                />
+                <button
+                  type="submit"
+                  disabled={!isConnected || !newMessage.trim()}
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 rounded-xl text-xs tracking-widest disabled:opacity-30 transition-all active:scale-95"
+                >
+                  SEND
+                </button>
+              </form>
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center text-slate-500">
+            <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mb-4 animate-pulse">📡</div>
+            <p className="text-xs font-bold tracking-widest uppercase">Select a conversation</p>
+          </div>
+        )}
       </div>
+
+      {showNewChatModal && (
+        <NewChatModal
+          onClose={() => setShowNewChatModal(false)}
+          onChatCreated={handleChatCreated}
+        />
+      )}
     </div>
   );
 };
 
-export default NewChatModal;
+export default Chat;

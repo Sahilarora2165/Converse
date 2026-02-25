@@ -10,12 +10,14 @@ import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.simp.SimpMessageSendingOperations;
+import org.springframework.security.access.prepost.PreAuthorize; // NEW: Import for auth.
 import org.springframework.stereotype.Controller;
 
 import java.security.Principal;
 import java.time.LocalDateTime;
 
 @Controller
+@PreAuthorize("isAuthenticated()") // NEW: Class-level auth—blocks anon on all mappings.
 public class ChatWebSocketController {
 
     private final SimpMessageSendingOperations messagingTemplate;
@@ -25,10 +27,10 @@ public class ChatWebSocketController {
     private final PresenceService presenceService;
 
     public ChatWebSocketController(SimpMessageSendingOperations messagingTemplate,
-                                   MessageService messageService,
-                                   UserService userService,
-                                   ChatRoomService chatRoomService,
-                                   PresenceService presenceService) {
+            MessageService messageService,
+            UserService userService,
+            ChatRoomService chatRoomService,
+            PresenceService presenceService) {
         this.messagingTemplate = messagingTemplate;
         this.messageService = messageService;
         this.userService = userService;
@@ -53,17 +55,14 @@ public class ChatWebSocketController {
 
         messagingTemplate.convertAndSend(
                 "/topic/chatroom/" + messageDTO.getChatRoomId(),
-                savedMessage
-        );
+                savedMessage);
     }
-
 
     @MessageMapping("/chat/{roomId}/sendMessage")
     public void sendMessage(
             @DestinationVariable Long roomId,
             @Payload SendMessageDTO sendMessageDTO,
-            Principal principal
-    ) {
+            Principal principal) {
         if (principal == null) {
             System.out.println("Principal is null - Message rejected");
             return;
@@ -83,33 +82,15 @@ public class ChatWebSocketController {
         messagingTemplate.convertAndSend("/topic/chatroom/" + roomId, savedMessage);
     }
 
-    @MessageMapping("/chat.typing/{chatRoomId}")
-    public void handleTyping(@DestinationVariable Long chatRoomId,
-                            @Payload TypingStatusDTO typingStatus,
-                            Principal principal) {
-        if (principal == null) {
-            return;
-        }
-
-        String email = principal.getName();
-        User user = userService.getUserEntityByEmail(email);
-
-        if (!chatRoomService.isUserInChatRoom(chatRoomId, user.getId())) {
-            return;
-        }
-
-        TypingStatusDTO statusDTO = new TypingStatusDTO(
-                user.getId(),
-                user.getUsername(),
-                chatRoomId,
-                typingStatus.isTyping()
-        );
-
-        messagingTemplate.convertAndSend(
-                "/topic/chatroom/" + chatRoomId + "/typing",
-                statusDTO
-        );
-    }
+    // @MessageMapping("/chat.typing/{chatRoomId}")
+    // public void handleTyping(@DestinationVariable Long chatRoomId,
+    // @Payload TypingStatusDTO typingStatus,
+    // Principal principal) {
+    // if (principal == null) {
+    // return;
+    // }
+    //
+    // String email = principal.getName();
 
     @MessageMapping("/chat.read/{messageId}")
     public void handleReadReceipt(@DestinationVariable Long messageId, Principal principal) {
@@ -127,13 +108,11 @@ public class ChatWebSocketController {
                 user.getId(),
                 user.getUsername(),
                 message.getChatRoomId(),
-                LocalDateTime.now()
-        );
+                LocalDateTime.now());
 
         messagingTemplate.convertAndSend(
                 "/topic/chatroom/" + message.getChatRoomId() + "/read",
-                readReceipt
-        );
+                readReceipt);
     }
 
     @MessageMapping("/presence.update")
@@ -149,25 +128,53 @@ public class ChatWebSocketController {
         presenceService.broadcastPresenceChange(updatedStatus);
     }
 
-    @MessageMapping("/presence.connected")
-    public void userConnected(Principal principal) {
+    // REMOVED: /presence.connected and /presence.disconnected—duplicates
+    // EventListener, causes double broadcasts.
+
+    @MessageMapping("/chat.delivered")
+    public void handleDeliveredAck(
+            @Payload MessageDeliveredAckDTO ack,
+            Principal principal) {
         if (principal == null) {
             return;
         }
 
         String email = principal.getName();
         User user = userService.getUserEntityByEmail(email);
-        presenceService.userConnected(user.getId());
+
+        MessageDeliveryUpdateDTO update = messageService.markMessagesAsDelivered(
+                ack.getChatRoomId(),
+                user.getId(),
+                ack.getLastDeliveredMessageId());
+
+        if (update != null) {
+            messagingTemplate.convertAndSend(
+                    "/topic/chatroom/" + ack.getChatRoomId() + "/delivery",
+                    update);
+        }
     }
 
-    @MessageMapping("/presence.disconnected")
-    public void userDisconnected(Principal principal) {
+    @MessageMapping("/chat.seen")
+    public void handleSeenAck(
+            @Payload MessageSeenAckDTO ack,
+            Principal principal) {
         if (principal == null) {
             return;
         }
 
         String email = principal.getName();
         User user = userService.getUserEntityByEmail(email);
-        presenceService.userDisconnected(user.getId());
+
+        MessageSeenUpdateDTO update = messageService.markMessagesAsSeen(
+                ack.getChatRoomId(),
+                user.getId(),
+                ack.getLastSeenMessageId());
+
+        if (update != null) {
+            messagingTemplate.convertAndSend(
+                    "/topic/chatroom/" + ack.getChatRoomId() + "/seen",
+                    update);
+        }
     }
+
 }

@@ -1,117 +1,53 @@
-import { formatTime, isImageFile } from '../../utils/helpers';
-import { API_URL, MESSAGE_TYPES } from '../../utils/constants';
+import React from 'react';
 
-const MessageItem = ({ 
-  message, 
-  isOwnMessage, 
-  showSender,
-  participants 
-}) => {
-  const { content, messageType, fileUrl, fileName, senderUsername, timestamp, readByUserIds } = message;
+const MessageItem = ({ message, isMe, currentUserId }) => {
+  const renderStatusIcon = () => {
+    if (!isMe) return null;
 
-  const renderReadReceipt = () => {
-    if (!isOwnMessage) return null;
+    const isSeen = message.status === 'SEEN' || (message.readBy && message.readBy.includes(currentUserId));
 
-    const readCount = readByUserIds?.length || 0;
-    const totalOthers = participants?.length ? participants.length - 1 : 0;
+    if (isSeen) {
+      return (
+        <div className="ml-2 flex-shrink-0 relative w-4 h-4 text-blue-400">
+          <svg className="absolute left-0 w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+          </svg>
+          <svg className="absolute -right-1.5 w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+          </svg>
+        </div>
+      );
+    }
 
-    if (totalOthers === 0) return null;
-
-    const allRead = readCount >= totalOthers;
-    const someRead = readCount > 0;
+    if (message.status === 'DELIVERED') {
+      return (
+        <div className="ml-2 flex-shrink-0 relative w-4 h-4 text-gray-400">
+          <svg className="absolute left-0 w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+          </svg>
+          <svg className="absolute -right-1.5 w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+          </svg>
+        </div>
+      );
+    }
 
     return (
-      <span className="ml-1 text-xs">
-        {allRead ? (
-          <span className="text-blue-500" title="Read by all">✓✓</span>
-        ) : someRead ? (
-          <span className="text-gray-400" title={`Read by ${readCount}`}>✓✓</span>
-        ) : (
-          <span className="text-gray-400" title="Delivered">✓</span>
-        )}
-      </span>
+      <svg className="w-4 h-4 text-gray-500 ml-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+      </svg>
     );
   };
 
-  const renderContent = () => {
-    if (messageType === MESSAGE_TYPES.IMAGE && fileUrl) {
-      return (
-        <div className="space-y-2">
-          <a href={`${API_URL}${fileUrl}`} target="_blank" rel="noopener noreferrer">
-            <img
-              src={`${API_URL}${fileUrl}`}
-              alt={fileName || 'Image'}
-              className="max-w-xs rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
-              loading="lazy"
-            />
-          </a>
-          {content && <p className="text-sm">{content}</p>}
-        </div>
-      );
-    }
-
-    if (messageType === MESSAGE_TYPES.FILE && fileUrl) {
-      const extension = fileName?.split('.').pop()?.toLowerCase() || '';
-      const isImage = isImageFile(`image/${extension}`);
-
-      if (isImage) {
-        return (
-          <div className="space-y-2">
-            <a href={`${API_URL}${fileUrl}`} target="_blank" rel="noopener noreferrer">
-              <img
-                src={`${API_URL}${fileUrl}`}
-                alt={fileName || 'Image'}
-                className="max-w-xs rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
-                loading="lazy"
-              />
-            </a>
-            {content && <p className="text-sm">{content}</p>}
-          </div>
-        );
-      }
-
-      return (
-        <div className="space-y-2">
-          <a
-            href={`${API_URL}${fileUrl}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 p-2 bg-white/10 rounded-lg hover:bg-white/20 transition-colors"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-            </svg>
-            <div>
-              <p className="font-medium text-sm truncate max-w-[150px]">{fileName || 'File'}</p>
-              <p className="text-xs opacity-75">Click to download</p>
-            </div>
-          </a>
-          {content && <p className="text-sm">{content}</p>}
-        </div>
-      );
-    }
-
-    return <p className="text-sm whitespace-pre-wrap break-words">{content}</p>;
-  };
-
   return (
-    <div className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
-      <div className={`max-w-[70%] ${isOwnMessage ? 'order-2' : 'order-1'}`}>
-        {showSender && (
-          <p className="text-xs text-gray-500 mb-1 ml-3">{senderUsername}</p>
-        )}
-        <div
-          className={`px-4 py-2 rounded-2xl ${
-            isOwnMessage
-              ? 'bg-indigo-600 text-white rounded-br-md'
-              : 'bg-white text-gray-800 shadow-sm rounded-bl-md'
-          }`}
-        >
-          {renderContent()}
-        </div>
-        <div className={`flex items-center mt-1 ${isOwnMessage ? 'justify-end' : 'justify-start'} px-2`}>
-          <span className="text-xs text-gray-400">{formatTime(timestamp)}</span>
-          {renderReadReceipt()}
+    <div className={`flex ${isMe ? "justify-end" : "justify-start"} mb-4`}>
+      <div className={`px-5 py-3 rounded-2xl max-w-[70%] ${isMe ? "bg-gradient-to-br from-emerald-500 to-emerald-600 text-black" : "bg-[#1a1a1a] text-white border border-[#262626]"}`}>
+        <p className="break-words">{message.content}</p>
+        <div className="flex items-center justify-end mt-1 gap-1">
+          <span className="text-[10px] text-black/60">
+            {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+          {renderStatusIcon()}
         </div>
       </div>
     </div>

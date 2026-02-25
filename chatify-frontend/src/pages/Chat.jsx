@@ -1,14 +1,24 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import useAuth from "../hooks/useAuth";
 import useWebSocket from "../hooks/useWebSocket";
-import { getChatRooms, getChatHistory, sendMessageAPI } from "../services/api";
+import { getChatRooms, getChatHistory } from "../services/api";
+import api from "../services/api";
 import NewChatModal from "../components/NewChatModal";
 import ChatSidebar from "../components/ChatSidebar";
+import MessageItem from "../components/Chat/MessageItem";
 
 const Chat = () => {
-  const { user, logout } = useAuth();
-  const { subscribeToRoom, isConnected } = useWebSocket();
+  const { user } = useAuth();
+  const {
+    subscribeToRoom,
+    sendMessage,
+    isConnected,
+    subscribeToDelivery,
+    subscribeToSeen,
+    sendDeliveryAck,
+    sendSeenAck
+  } = useWebSocket();
   const { chatId } = useParams();
   const navigate = useNavigate();
 
@@ -19,187 +29,365 @@ const Chat = () => {
 
   const messagesEndRef = useRef(null);
   const subscriptionRef = useRef(null);
+  const deliverySubRef = useRef(null);
+  const seenSubRef = useRef(null);
+  const isChatActiveRef = useRef(false);
 
-  const currentRoom = rooms.find(r => String(r.id) === chatId);
+  const currentRoom = rooms.find(r => String(r.id) === String(chatId));
 
-  useEffect(() => {
-    const fetchRooms = async () => {
-      try {
-        const { data } = await getChatRooms();
-        setRooms(data);
-      } catch (err) {
-        console.error("Failed to fetch rooms", err);
-      }
-    };
-    fetchRooms();
-  }, []);
+  const otherUser = currentRoom && !currentRoom.isGroupChat
+    ? currentRoom.participants.find(p => String(p.id) !== String(user?.id))
+    : null;
 
-  useEffect(() => {
-    if (!currentRoom) return;
+  const isOtherUserOnline = otherUser?.status === 'ONLINE';
 
-    if (subscriptionRef.current) {
-      subscriptionRef.current.unsubscribe();
-    }
+  const formatRelativeTime = (dateString) => {
+    if (!dateString) return 'Offline';
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMin = Math.floor(diffMs / 60000);
 
-    setMessages([]);
+    if (diffMin < 1) return 'just now';
+    if (diffMin < 60) return `${diffMin} min ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr} ${diffHr === 1 ? 'hour' : 'hours'} ago`;
+    const diffDays = Math.floor(diffHr / 24);
+    return `${diffDays} ${diffDays === 1 ? 'day' : 'days'} ago`;
+  };
 
-    const loadRoom = async () => {
-      try {
-        const { data } = await getChatHistory(currentRoom.id);
-        setMessages(data);
+  const formatDateSeparator = (dateString) => {
+    const msgDate = new Date(dateString);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
 
-        if (isConnected) {
-          subscriptionRef.current = subscribeToRoom(
-            currentRoom.id,
-            (incomingMsg) => {
-              setMessages(prev => [...prev, incomingMsg]);
-            }
-          );
-        }
-      } catch (err) {
-        console.error("Failed to load chat room", err);
-      }
-    };
+    const msgDateOnly = new Date(msgDate.getFullYear(), msgDate.getMonth(), msgDate.getDate());
+    const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const yesterdayOnly = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
 
-    loadRoom();
-
-    return () => {
-      if (subscriptionRef.current) {
-        subscriptionRef.current.unsubscribe();
-      }
-    };
-  }, [chatId, isConnected]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const handleSend = async (e) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !currentRoom) return;
-
-    try {
-      await sendMessageAPI({
-        content: newMessage,
-        chatRoomId: currentRoom.id,
-        messageType: "TEXT",
-      });
-      setNewMessage("");
-    } catch (err) {
-      console.error("Failed to send message", err);
+    if (msgDateOnly.getTime() === todayOnly.getTime()) {
+      return 'Today';
+    } else if (msgDateOnly.getTime() === yesterdayOnly.getTime()) {
+      return 'Yesterday';
+    } else {
+      return msgDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
     }
   };
 
+  const groupMessagesByDate = (messages) => {
+    const grouped = [];
+    let lastDate = null;
+
+    messages.forEach((msg) => {
+      const msgDate = new Date(msg.timestamp).toDateString();
+
+      if (msgDate !== lastDate) {
+        grouped.push({
+          type: 'date-separator',
+          date: msg.timestamp,
+          id: `date-${msgDate}`
+        });
+        lastDate = msgDate;
+      }
+
+      grouped.push({ type: 'message', ...msg });
+    });
+
+    return grouped;
+  };
+
+  const scrollToBottom = useCallback((behavior = "smooth") => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
+  }, []);
+
+  const fetchRooms = async () => {
+    try {
+      const { data } = await getChatRooms();
+      setRooms(data);
+    } catch (err) {
+      console.error("Failed to load rooms", err);
+    }
+  };
+
+  useEffect(() => { fetchRooms(); }, []);
+
+  // Track chat focus for seen status
+  useEffect(() => {
+    const handleFocus = () => {
+      isChatActiveRef.current = true;
+      console.log('[FOCUS] Chat is now active');
+      if (chatId && messages.length > 0 && sendSeenAck) {
+        const lastMessageId = messages[messages.length - 1]?.id;
+        if (lastMessageId) {
+          console.log('[SEEN ACK] Sending on focus, messageId:', lastMessageId);
+          sendSeenAck(parseInt(chatId), lastMessageId);
+        }
+      }
+    };
+
+    const handleBlur = () => {
+      isChatActiveRef.current = false;
+      console.log('[BLUR] Chat is now inactive');
+    };
+
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('blur', handleBlur);
+    isChatActiveRef.current = true;
+    console.log('[INIT] Chat is active on mount');
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [chatId, messages, sendSeenAck]);
+
+  // Load history + subscribe to updates
+  useEffect(() => {
+    // CRITICAL: Don't proceed if WebSocket is not connected - subscriptions will fail
+    if (!chatId || !isConnected) {
+      if (!chatId) {
+        setMessages([]);
+        subscriptionRef.current?.unsubscribe();
+        deliverySubRef.current?.unsubscribe();
+        seenSubRef.current?.unsubscribe();
+      }
+      // If just not connected yet, wait - effect will re-run when isConnected changes
+      return;
+    }
+
+    const loadHistoryAndSubscribe = async () => {
+      try {
+        console.log('[HISTORY] Loading chat history for room:', chatId);
+
+        // STEP 1: Load message history
+        const { data } = await getChatHistory(chatId);
+        console.log('[HISTORY] Loaded', data?.length || 0, 'messages');
+        console.log('[HISTORY] Message statuses:', data?.map(m => ({ id: m.id, status: m.status, senderId: m.senderId })));
+        setMessages(data || []);
+        scrollToBottom('auto');
+
+        // STEP 2: Mark all messages as read in backend
+        await api.put(`/messages/chatroom/${chatId}/read-all`);
+        console.log('[READ] Marked all messages as read in backend');
+
+        // STEP 3: Send delivery ACK ONLY for OTHER people's messages
+        if (data && data.length > 0 && sendDeliveryAck) {
+          const otherMessages = data.filter(m => m.senderId !== user?.id);
+          if (otherMessages.length > 0) {
+            const lastOtherId = otherMessages[otherMessages.length - 1]?.id;
+            if (lastOtherId) {
+              console.log('[DELIVERY ACK] Sending for history, lastId:', lastOtherId);
+              sendDeliveryAck(parseInt(chatId), lastOtherId);
+            }
+          }
+        }
+
+        // STEP 4: Send seen ACK if chat is active
+        if (data && data.length > 0 && sendSeenAck && isChatActiveRef.current) {
+          const otherMessages = data.filter(m => m.senderId !== user?.id);
+          if (otherMessages.length > 0) {
+            const lastOtherId = otherMessages[otherMessages.length - 1]?.id;
+            if (lastOtherId) {
+              console.log('[SEEN ACK] Sending for history, lastId:', lastOtherId);
+              sendSeenAck(parseInt(chatId), lastOtherId);
+            }
+          }
+        }
+
+        // STEP 5: Subscribe to new messages
+        subscriptionRef.current?.unsubscribe();
+        subscriptionRef.current = subscribeToRoom(chatId, (message) => {
+          console.log('[NEW MESSAGE] Received:', message);
+          console.log('[NEW MESSAGE] Status:', message.status, 'SenderId:', message.senderId, 'MyId:', user?.id);
+
+          setMessages(prev => [...prev, message]);
+          scrollToBottom();
+
+          // Auto-send delivery ACK for incoming messages
+          if (sendDeliveryAck && message.senderId !== user?.id) {
+            console.log('[DELIVERY ACK] Auto-sending for new message, id:', message.id);
+            sendDeliveryAck(parseInt(chatId), message.id);
+          }
+
+          // Auto-send seen ACK if chat is active
+          if (sendSeenAck && message.senderId !== user?.id && isChatActiveRef.current) {
+            console.log('[SEEN ACK] Auto-sending for new message, id:', message.id);
+            sendSeenAck(parseInt(chatId), message.id);
+          }
+        });
+
+        // STEP 6: Subscribe to delivery status updates
+        deliverySubRef.current?.unsubscribe();
+        if (subscribeToDelivery) {
+          console.log('[SUBSCRIBE] Subscribing to delivery updates for room:', chatId);
+          deliverySubRef.current = subscribeToDelivery(chatId, (update) => {
+            console.log('[DELIVERY UPDATE] Received:', update);
+            console.log('[DELIVERY UPDATE] Will update messages ≤', update.lastDeliveredMessageId);
+
+            setMessages(prev => {
+              const updated = prev.map(msg => {
+                const shouldUpdate = msg.senderId === user?.id &&
+                  msg.id <= update.lastDeliveredMessageId &&
+                  msg.status === 'SENT';
+
+                if (shouldUpdate) {
+                  console.log('[DELIVERY UPDATE] Updating message', msg.id, 'from SENT to DELIVERED');
+                }
+
+                return shouldUpdate ? { ...msg, status: 'DELIVERED' } : msg;
+              });
+
+              console.log('[DELIVERY UPDATE] Updated message statuses:',
+                updated.filter(m => m.senderId === user?.id).map(m => ({ id: m.id, status: m.status }))
+              );
+
+              return updated;
+            });
+          });
+        }
+
+        // STEP 7: Subscribe to seen status updates
+        seenSubRef.current?.unsubscribe();
+        if (subscribeToSeen) {
+          console.log('[SUBSCRIBE] Subscribing to seen updates for room:', chatId);
+          seenSubRef.current = subscribeToSeen(chatId, (update) => {
+            console.log('[SEEN UPDATE] Received:', update);
+            console.log('[SEEN UPDATE] Will update messages ≤', update.lastSeenMessageId);
+
+            setMessages(prev => {
+              const updated = prev.map(msg => {
+                const shouldUpdate = msg.senderId === user?.id &&
+                  msg.id <= update.lastSeenMessageId &&
+                  (msg.status === 'SENT' || msg.status === 'DELIVERED');
+
+                if (shouldUpdate) {
+                  console.log('[SEEN UPDATE] Updating message', msg.id, 'from', msg.status, 'to SEEN');
+                }
+
+                return shouldUpdate ? { ...msg, status: 'SEEN' } : msg;
+              });
+
+              console.log('[SEEN UPDATE] Updated message statuses:',
+                updated.filter(m => m.senderId === user?.id).map(m => ({ id: m.id, status: m.status }))
+              );
+
+              return updated;
+            });
+          });
+        }
+
+        console.log('[INIT] All subscriptions complete for room:', chatId);
+
+      } catch (err) {
+        console.error("[ERROR] Failed to load chat history or subscribe", err);
+        setMessages([]);
+      }
+    };
+
+    loadHistoryAndSubscribe();
+
+    return () => {
+      console.log('[CLEANUP] Unsubscribing from room:', chatId);
+      subscriptionRef.current?.unsubscribe();
+      deliverySubRef.current?.unsubscribe();
+      seenSubRef.current?.unsubscribe();
+    };
+  }, [chatId, isConnected, subscribeToRoom, subscribeToDelivery, subscribeToSeen, sendDeliveryAck, sendSeenAck, scrollToBottom, user?.id]);
+
+  const handleSendMessage = (e) => {
+    e.preventDefault();
+    if (!newMessage.trim() || !isConnected) return;
+
+    console.log('[SEND] Sending message:', newMessage.trim());
+    sendMessage(chatId, newMessage.trim());
+    setNewMessage("");
+  };
+
+  const groupedMessages = groupMessagesByDate(messages);
+
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-200 overflow-hidden">
+    <div className="flex h-screen bg-[#0a0a0a]">
+      <ChatSidebar rooms={rooms} setRooms={setRooms} onNewChat={() => setShowNewChatModal(true)} />
 
-      {/* SIDEBAR */}
-      <ChatSidebar rooms={rooms} setRooms={setRooms} />
-
-      {/* MAIN CHAT AREA */}
-      <div className="flex-1 flex flex-col bg-slate-900/50">
-
-        {/* HEADER */}
-        <div className="h-16 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md flex justify-between items-center px-6">
-          <div className="flex flex-col">
-            <h2 className="font-bold text-sm tracking-tight text-white uppercase">
-              {currentRoom ? (currentRoom.isGroupChat ? `# ${currentRoom.name}` : `direct_message / ${currentRoom.name}`) : "Select a Node"}
-            </h2>
-            <div className="flex items-center gap-2">
-               <span className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]" : "bg-red-500"}`}></span>
-               <span className="text-[10px] text-slate-500 font-mono">{isConnected ? "SYSTEM_READY" : "CONNECTION_LOST"}</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => setShowNewChatModal(true)}
-              className="text-xs font-bold border border-slate-700 hover:border-blue-500 px-4 py-1.5 rounded transition-all"
-            >
-              + NEW COLLAB
-            </button>
-
-            <button
-              onClick={logout}
-              className="text-xs font-bold text-slate-500 hover:text-red-400 transition-colors"
-            >
-              TERMINATE_SESSION
-            </button>
-          </div>
-        </div>
-
-        {/* CONTENT */}
+      <div className="flex-1 flex flex-col">
         {currentRoom ? (
           <>
+            {/* HEADER */}
+            <div className="p-6 bg-gradient-to-r from-[#1a1a1a] to-[#141414] border-b border-[#2a2a2a] shadow-2xl backdrop-blur-sm">
+              <div className="flex items-center gap-4">
+                <h2 className="text-xl font-semibold text-[#e8e8e8] tracking-wide">
+                  {currentRoom.isGroupChat ? currentRoom.name : otherUser?.username || 'Unknown'}
+                </h2>
+
+                {!currentRoom.isGroupChat && otherUser && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className={`w-2 h-2 rounded-full ${isOtherUserOnline ? "bg-[#c9a961] shadow-[0_0_8px_rgba(201,169,97,0.6)]" : "bg-[#4a4a4a]"}`} />
+                    <span className={isOtherUserOnline ? "text-[#c9a961]" : "text-[#6a6a6a]"}>
+                      {isOtherUserOnline ? "Online" : `Last seen ${formatRelativeTime(otherUser.lastSeen)}`}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* MESSAGES */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-hide">
-              {messages.map((msg, index) => {
-                const isMe = msg.senderId === user.id;
-                return (
-                  <div key={index} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[70%] group`}>
-                      {!isMe && (
-                        <div className="text-[10px] font-mono mb-1 text-blue-400 uppercase tracking-widest">
-                          {msg.senderEmail.split('@')[0]}
-                        </div>
-                      )}
-                      <div
-                        className={`rounded-xl px-4 py-2.5 shadow-sm text-sm leading-relaxed ${
-                          isMe
-                            ? "bg-blue-600 text-white rounded-tr-none"
-                            : "bg-slate-800 text-slate-200 border border-slate-700 rounded-tl-none"
-                        }`}
-                      >
-                        {msg.content}
-                      </div>
-                      <div className={`text-[9px] mt-1 font-mono text-slate-500 ${isMe ? "text-right" : "text-left"}`}>
-                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            <div className="flex-1 overflow-y-auto p-8 space-y-2 bg-gradient-to-b from-[#0a0a0a] via-[#0d0d0d] to-[#0a0a0a]">
+              {groupedMessages.map((item) => {
+                if (item.type === 'date-separator') {
+                  return (
+                    <div key={item.id} className="flex justify-center my-6">
+                      <div className="px-4 py-1.5 bg-[#1a1a1a]/80 backdrop-blur-md rounded-full border border-[#2a2a2a] shadow-lg">
+                        <span className="text-xs font-medium text-[#8a8a8a] uppercase tracking-wider">
+                          {formatDateSeparator(item.date)}
+                        </span>
                       </div>
                     </div>
-                  </div>
+                  );
+                }
+
+                const isMe = String(item.senderId) === String(user?.id);
+                return (
+                  <MessageItem
+                    key={item.id}
+                    message={item}
+                    isMe={isMe}
+                    currentUserId={user?.id}
+                  />
                 );
               })}
               <div ref={messagesEndRef} />
             </div>
 
             {/* INPUT */}
-            <div className="p-4 bg-slate-900 border-t border-slate-800">
-              <form onSubmit={handleSend} className="flex gap-3 max-w-5xl mx-auto">
+            <form onSubmit={handleSendMessage} className="p-6 bg-gradient-to-r from-[#1a1a1a] to-[#141414] border-t border-[#2a2a2a] shadow-[0_-4px_20px_rgba(0,0,0,0.5)]">
+              <div className="flex gap-3">
                 <input
-                  type="text"
-                  className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 transition-all placeholder:text-slate-600"
-                  placeholder={`Message ${currentRoom.name}...`}
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
+                  disabled={!isConnected}
+                  placeholder="Type a message…"
+                  className="flex-1 bg-[#0f0f0f] border border-[#2a2a2a] rounded-xl px-5 py-3.5 text-[#e8e8e8] placeholder-[#5a5a5a] focus:outline-none focus:border-[#c9a961] focus:shadow-[0_0_0_3px_rgba(201,169,97,0.1)] transition-all"
                 />
                 <button
                   type="submit"
-                  disabled={!isConnected || !newMessage.trim()}
-                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 rounded-lg text-xs tracking-widest disabled:opacity-30 transition-all shadow-lg shadow-blue-900/20"
+                  disabled={!newMessage.trim() || !isConnected}
+                  className="px-6 py-3.5 rounded-xl bg-gradient-to-br from-[#c9a961] via-[#b8955a] to-[#a8865a] text-[#0a0a0a] font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:shadow-[0_4px_20px_rgba(201,169,97,0.4)] active:scale-95 transition-all"
                 >
-                  SEND
+                  Send
                 </button>
-              </form>
-            </div>
+              </div>
+            </form>
           </>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-slate-600 italic font-mono">
-            <div className="w-16 h-16 border-2 border-slate-800 rounded-full flex items-center justify-center mb-4 animate-pulse">
-               <span className="text-2xl not-italic">⚡</span>
-            </div>
-            <p className="text-xs uppercase tracking-[0.2em]">Awaiting Data Stream Selection</p>
+          <div className="flex-1 flex items-center justify-center text-[#5a5a5a]">
+            Select a chat to start messaging
           </div>
         )}
       </div>
 
       {showNewChatModal && (
-        <NewChatModal
-          onClose={() => setShowNewChatModal(false)}
-          onChatCreated={(newRoom) => {
-            setRooms(prev => [newRoom, ...prev]);
-            navigate(`/chat/${newRoom.id}`);
-          }}
-        />
+        <NewChatModal onClose={() => setShowNewChatModal(false)} onChatCreated={fetchRooms} />
       )}
     </div>
   );

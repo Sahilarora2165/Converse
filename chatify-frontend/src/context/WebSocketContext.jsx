@@ -1,4 +1,4 @@
-import React, { createContext, useRef, useEffect, useState } from 'react';
+import React, { createContext, useRef, useEffect, useState, useCallback } from 'react';
 import SockJS from 'sockjs-client';
 import Stomp from 'stompjs';
 import useAuth from '../hooks/useAuth';
@@ -11,72 +11,98 @@ export const WebSocketProvider = ({ children }) => {
     const stompClientRef = useRef(null);
 
     useEffect(() => {
-        // Only connect if we have a user and a token
         if (!token || !user) return;
 
-        console.log("🔄 Attempting WebSocket Connection...");
-
-        // 1. Create the connection
         const socket = new SockJS('http://localhost:8080/ws');
         const client = Stomp.over(socket);
 
-        // Optional: Disable huge debug logs in console
-        // client.debug = () => {}; 
-
-        // 2. Connect with Auth Header
         client.connect(
             { 'Authorization': 'Bearer ' + token },
             (frame) => {
-                console.log('✅ WebSocket Connected Successfully!');
                 setIsConnected(true);
                 stompClientRef.current = client;
             },
             (error) => {
-                console.error('❌ WebSocket Error:', error);
                 setIsConnected(false);
+                console.error('WebSocket error:', error);
             }
         );
 
-        // Cleanup on unmount or logout
         return () => {
-            if (client && client.connected) {
+            if (client.connected) {
                 client.disconnect();
-                console.log("🔌 WebSocket Disconnected");
+                setIsConnected(false);
             }
         };
     }, [token, user]);
 
-    // Function to Subscribe to a specific Chat Room
-    const subscribeToRoom = (roomId, callback) => {
+    const subscribeToRoom = useCallback((roomId, callback) => {
         if (!stompClientRef.current || !isConnected) return null;
-
-        return stompClientRef.current.subscribe(`/topic/chatroom/${roomId}`, (message) => {
-            const parsedMessage = JSON.parse(message.body);
-            callback(parsedMessage);
+        return stompClientRef.current.subscribe(`/topic/chatroom/${roomId}`, (msg) => {
+            callback(JSON.parse(msg.body));
         });
-    };
+    }, [isConnected]);
 
-    // Function to Send a Message
-    const sendMessage = (roomId, content) => {
-        if (stompClientRef.current && isConnected) {
-            const payload = {
-                content: content,
-                chatRoomId: roomId
-                // Sender ID is handled by Backend via Token
-            };
-            
-            stompClientRef.current.send(
-                `/app/chat/${roomId}/sendMessage`,
-                {},
-                JSON.stringify(payload)
-            );
-        } else {
-            console.error("Cannot send message: WebSocket not connected");
+    const subscribeToPresence = useCallback((roomId, callback) => {
+        if (!stompClientRef.current || !isConnected) return null;
+        return stompClientRef.current.subscribe(`/topic/chatroom/${roomId}/presence`, (msg) => {
+            callback(JSON.parse(msg.body));
+        });
+    }, [isConnected]);
+
+    // NEW: Subscribe to delivery status updates
+    const subscribeToDelivery = useCallback((roomId, callback) => {
+        if (!stompClientRef.current || !isConnected) return null;
+        return stompClientRef.current.subscribe(`/topic/chatroom/${roomId}/delivery`, (msg) => {
+            callback(JSON.parse(msg.body));
+        });
+    }, [isConnected]);
+
+    // NEW: Subscribe to seen status updates
+    const subscribeToSeen = useCallback((roomId, callback) => {
+        if (!stompClientRef.current || !isConnected) return null;
+        return stompClientRef.current.subscribe(`/topic/chatroom/${roomId}/seen`, (msg) => {
+            callback(JSON.parse(msg.body));
+        });
+    }, [isConnected]);
+
+    const sendMessage = useCallback((roomId, content) => {
+        if (stompClientRef.current?.connected) {
+            stompClientRef.current.send(`/app/chat/${roomId}/sendMessage`, {}, JSON.stringify({ content, chatRoomId: roomId }));
         }
-    };
+    }, []);
+
+    // NEW: Send delivery acknowledgment
+    const sendDeliveryAck = useCallback((chatRoomId, lastDeliveredMessageId) => {
+        if (stompClientRef.current?.connected) {
+            stompClientRef.current.send('/app/chat.delivered', {}, JSON.stringify({
+                chatRoomId,
+                lastDeliveredMessageId
+            }));
+        }
+    }, []);
+
+    // NEW: Send seen acknowledgment
+    const sendSeenAck = useCallback((chatRoomId, lastSeenMessageId) => {
+        if (stompClientRef.current?.connected) {
+            stompClientRef.current.send('/app/chat.seen', {}, JSON.stringify({
+                chatRoomId,
+                lastSeenMessageId
+            }));
+        }
+    }, []);
 
     return (
-        <WebSocketContext.Provider value={{ isConnected, subscribeToRoom, sendMessage }}>
+        <WebSocketContext.Provider value={{
+            isConnected,
+            subscribeToRoom,
+            subscribeToPresence,
+            subscribeToDelivery,
+            subscribeToSeen,
+            sendMessage,
+            sendDeliveryAck,
+            sendSeenAck
+        }}>
             {children}
         </WebSocketContext.Provider>
     );

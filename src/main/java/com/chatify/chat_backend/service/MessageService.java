@@ -1,10 +1,13 @@
 package com.chatify.chat_backend.service;
 
 import com.chatify.chat_backend.dto.MessageDTO;
+import com.chatify.chat_backend.dto.MessageDeliveryUpdateDTO;
+import com.chatify.chat_backend.dto.MessageSeenUpdateDTO;
 import com.chatify.chat_backend.dto.SendMessageDTO;
 import com.chatify.chat_backend.entity.ChatRoom;
 import com.chatify.chat_backend.entity.Message;
 import com.chatify.chat_backend.entity.User;
+import com.chatify.chat_backend.entity.enums.MessageStatus;
 import com.chatify.chat_backend.exception.ResourceNotFoundException;
 import com.chatify.chat_backend.exception.UnauthorizedException;
 import com.chatify.chat_backend.repository.MessageRepository;
@@ -14,6 +17,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -25,8 +29,8 @@ public class MessageService {
     private final UserService userService;
 
     public MessageService(MessageRepository messageRepository,
-                         ChatRoomService chatRoomService,
-                         UserService userService) {
+            ChatRoomService chatRoomService,
+            UserService userService) {
         this.messageRepository = messageRepository;
         this.chatRoomService = chatRoomService;
         this.userService = userService;
@@ -48,7 +52,13 @@ public class MessageService {
         message.setFileName(dto.getFileName());
         message.setSender(sender);
         message.setChatRoom(chatRoom);
-        message.setDelivered(true);
+
+        // FIXED: Messages start as SENT, not SEEN
+        message.setStatus(MessageStatus.SENT);
+
+        // REMOVED: Do NOT auto-mark sender's messages as SEEN
+        // The sender doesn't need to "see" their own message
+        // Status will update to DELIVERED/SEEN when recipient interacts
 
         Message savedMessage = messageRepository.save(message);
         return mapToDTO(savedMessage);
@@ -86,7 +96,7 @@ public class MessageService {
     public MessageDTO markMessageAsRead(Long messageId, Long userId) {
         Message message = messageRepository.findById(messageId)
                 .orElseThrow(() -> new ResourceNotFoundException("Message", messageId));
-        
+
         User user = userService.getUserEntityById(userId);
         ChatRoom chatRoom = message.getChatRoom();
 
@@ -108,10 +118,24 @@ public class MessageService {
             throw new UnauthorizedException("User is not a participant of this chat room");
         }
 
+        // Fetch all unread for this user (uses your existing query)
         List<Message> unreadMessages = messageRepository.findUnreadMessagesByChatRoomAndUser(chatRoom, user);
-        for (Message message : unreadMessages) {
-            message.getReadBy().add(user);
+
+        if (unreadMessages.isEmpty()) {
+            return;
         }
+
+        LocalDateTime now = LocalDateTime.now();
+        for (Message message : unreadMessages) {
+            // FIXED: Only mark OTHER people's messages as read
+            // Don't add yourself to readBy for your own messages
+            if (!message.getSender().getId().equals(userId)) {
+                message.getReadBy().add(user);
+                message.setStatus(MessageStatus.SEEN);
+                message.setSeenAt(now);
+            }
+        }
+
         messageRepository.saveAll(unreadMessages);
     }
 
@@ -119,12 +143,85 @@ public class MessageService {
     public void deleteMessage(Long messageId, Long userId) {
         Message message = messageRepository.findById(messageId)
                 .orElseThrow(() -> new ResourceNotFoundException("Message", messageId));
-        
+
         if (!message.getSender().getId().equals(userId)) {
             throw new UnauthorizedException("Only the sender can delete this message");
         }
 
         messageRepository.delete(message);
+    }
+
+    @Transactional
+    public MessageDeliveryUpdateDTO markMessagesAsDelivered(
+            Long chatRoomId,
+            Long recipientUserId,
+            Long lastDeliveredMessageId) {
+        User recipient = userService.getUserEntityById(recipientUserId);
+        ChatRoom chatRoom = chatRoomService.getChatRoomEntity(chatRoomId);
+
+        if (!chatRoom.getParticipants().contains(recipient)) {
+            throw new UnauthorizedException("User is not a participant of this chat room");
+        }
+
+        List<Message> messagesToUpdate = messageRepository.findMessagesToDeliver(
+                chatRoom,
+                recipient,
+                lastDeliveredMessageId);
+
+        if (messagesToUpdate.isEmpty()) {
+            return null;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        for (Message message : messagesToUpdate) {
+            message.setStatus(MessageStatus.DELIVERED);
+            message.setDeliveredAt(now);
+        }
+
+        messageRepository.saveAll(messagesToUpdate);
+
+        return new MessageDeliveryUpdateDTO(
+                chatRoomId,
+                lastDeliveredMessageId);
+    }
+
+    @Transactional
+    public MessageSeenUpdateDTO markMessagesAsSeen(
+            Long chatRoomId,
+            Long recipientUserId,
+            Long lastSeenMessageId) {
+        User recipient = userService.getUserEntityById(recipientUserId);
+        ChatRoom chatRoom = chatRoomService.getChatRoomEntity(chatRoomId);
+
+        if (!chatRoom.getParticipants().contains(recipient)) {
+            throw new UnauthorizedException("User is not a participant of this chat room");
+        }
+
+        List<Message> messagesToUpdate = messageRepository.findMessagesToMarkSeen(
+                chatRoom,
+                recipient,
+                lastSeenMessageId);
+
+        if (messagesToUpdate.isEmpty()) {
+            return null;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        for (Message message : messagesToUpdate) {
+            // If transitioning directly from SENT to SEEN, also set deliveredAt
+            if (message.getStatus() == MessageStatus.SENT) {
+                message.setDeliveredAt(now);
+            }
+            message.setStatus(MessageStatus.SEEN);
+            message.setSeenAt(now);
+            message.getReadBy().add(recipient);
+        }
+
+        messageRepository.saveAll(messagesToUpdate);
+
+        return new MessageSeenUpdateDTO(
+                chatRoomId,
+                lastSeenMessageId);
     }
 
     public MessageDTO mapToDTO(Message message) {
@@ -139,7 +236,8 @@ public class MessageService {
                 message.getChatRoom().getId(),
                 message.getTimestamp(),
                 message.getReadBy().stream().map(User::getId).collect(Collectors.toSet()),
-                message.isDelivered()
+                message.getStatus()
+
         );
     }
 }

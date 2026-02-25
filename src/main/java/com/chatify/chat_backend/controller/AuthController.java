@@ -20,9 +20,7 @@ public class AuthController {
     public AuthController(AuthService authService, JwtUtil jwtUtil){ // ✅ Inject JwtUtil
         this.authService = authService;
         this.jwtUtil = jwtUtil;
-    }
-
-    // Register a new user
+    }  // Register a new user
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody UserRegistrationDTO registrationDTO){
         try{

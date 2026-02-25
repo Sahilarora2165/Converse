@@ -4,6 +4,7 @@ import com.chatify.chat_backend.dto.ChatRoomDTO;
 import com.chatify.chat_backend.dto.CreateChatRequest;
 import com.chatify.chat_backend.dto.UserDTO;
 import com.chatify.chat_backend.entity.ChatRoom;
+import com.chatify.chat_backend.entity.Message;
 import com.chatify.chat_backend.entity.User;
 import com.chatify.chat_backend.exception.BadRequestException;
 import com.chatify.chat_backend.exception.ResourceNotFoundException;
@@ -13,6 +14,7 @@ import com.chatify.chat_backend.repository.MessageRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -27,8 +29,8 @@ public class ChatRoomService {
     private final UserService userService;
 
     public ChatRoomService(ChatRoomRepository chatRoomRepository,
-                          MessageRepository messageRepository,
-                          UserService userService) {
+                           MessageRepository messageRepository,
+                           UserService userService) {
         this.chatRoomRepository = chatRoomRepository;
         this.messageRepository = messageRepository;
         this.userService = userService;
@@ -38,7 +40,7 @@ public class ChatRoomService {
     @Transactional
     public ChatRoomDTO addParticipant(Long chatRoomId, Long userId, Long requesterId) {
         ChatRoom chatRoom = getChatRoomEntity(chatRoomId);
-        
+
         if (!chatRoom.isGroupChat()) {
             throw new BadRequestException("Cannot add participants to a private chat");
         }
@@ -49,7 +51,7 @@ public class ChatRoomService {
 
         User newParticipant = userService.getUserEntityById(userId);
         chatRoom.getParticipants().add(newParticipant);
-        
+
         ChatRoom savedRoom = chatRoomRepository.save(chatRoom);
         return mapToDTO(savedRoom, chatRoom.getAdmin());
     }
@@ -57,7 +59,7 @@ public class ChatRoomService {
     @Transactional
     public ChatRoomDTO removeParticipant(Long chatRoomId, Long userId, Long requesterId) {
         ChatRoom chatRoom = getChatRoomEntity(chatRoomId);
-        
+
         if (!chatRoom.isGroupChat()) {
             throw new BadRequestException("Cannot remove participants from a private chat");
         }
@@ -68,7 +70,7 @@ public class ChatRoomService {
 
         User participantToRemove = userService.getUserEntityById(userId);
         chatRoom.getParticipants().remove(participantToRemove);
-        
+
         ChatRoom savedRoom = chatRoomRepository.save(chatRoom);
         return mapToDTO(savedRoom, chatRoom.getAdmin());
     }
@@ -79,6 +81,15 @@ public class ChatRoomService {
         return chatRoomRepository.findByParticipant(user).stream()
                 .map(room -> mapToDTO(room, user))
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<Long> getChatRoomIdsForUser(Long userId) {
+        if (userId == null) {
+            return List.of();  // Defensive guard—prevents NPE on invalid calls.
+        }
+        // FIXED: Use exact repo method name returning List<Long> directly.
+        return chatRoomRepository.findChatRoomIdsByParticipantId(userId);
     }
 
 
@@ -157,11 +168,11 @@ public class ChatRoomService {
     public ChatRoomDTO getChatRoomById(Long chatRoomId, Long userId) {
         User user = userService.getUserEntityById(userId);
         ChatRoom chatRoom = getChatRoomEntity(chatRoomId);
-        
+
         if (!chatRoom.getParticipants().contains(user)) {
             throw new UnauthorizedException("User is not a participant of this chat room");
         }
-        
+
         return mapToDTO(chatRoom, user);
     }
 
@@ -177,14 +188,31 @@ public class ChatRoomService {
         return chatRoom.getParticipants().contains(user);
     }
 
+
     private ChatRoomDTO mapToDTO(ChatRoom chatRoom, User currentUser) {
         Set<UserDTO> participantDTOs = chatRoom.getParticipants().stream()
                 .map(userService::mapToDTO)
                 .collect(Collectors.toSet());
 
         UserDTO adminDTO = chatRoom.getAdmin() != null ? userService.mapToDTO(chatRoom.getAdmin()) : null;
-        
+
         Long unreadCount = messageRepository.countUnreadMessagesByChatRoomAndUser(chatRoom, currentUser);
+
+        // Fetch last message for preview
+        Optional<Message> lastMessageOpt = messageRepository.findTopByChatRoomOrderByTimestampDesc(chatRoom);
+
+        String lastMessageContent = null;
+        LocalDateTime lastMessageTime = null;
+        Long lastMessageSenderId = null;
+        String lastMessageSenderName = null;
+
+        if (lastMessageOpt.isPresent()) {
+            Message lastMsg = lastMessageOpt.get();
+            lastMessageContent = lastMsg.getContent();
+            lastMessageTime = lastMsg.getTimestamp();
+            lastMessageSenderId = lastMsg.getSender().getId();
+            lastMessageSenderName = lastMsg.getSender().getUsername();
+        }
 
         return new ChatRoomDTO(
                 chatRoom.getId(),
@@ -193,7 +221,12 @@ public class ChatRoomService {
                 participantDTOs,
                 adminDTO,
                 chatRoom.getCreatedAt(),
-                unreadCount
+                unreadCount,
+                lastMessageContent,
+                lastMessageTime,
+                lastMessageSenderId,
+                lastMessageSenderName
         );
     }
+
 }

@@ -91,12 +91,17 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                                 log.debug("WebSocket authenticated user: {}", email);
                             } else {
                                 log.warn("WebSocket authentication failed: invalid token");
+                                throw new IllegalArgumentException("Invalid JWT token");
                             }
+                        } catch (IllegalArgumentException e) {
+                            throw e;
                         } catch (Exception e) {
                             log.warn("Error parsing JWT in WebSocket: {}", e.getMessage());
+                            throw new IllegalArgumentException("JWT parsing failed");
                         }
                     } else {
                         log.warn("No Authorization header found in WebSocket CONNECT frame");
+                        throw new IllegalArgumentException("Missing Authorization header");
                     }
                 }
                 return message;

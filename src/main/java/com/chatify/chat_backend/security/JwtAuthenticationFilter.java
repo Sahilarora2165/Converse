@@ -1,5 +1,3 @@
-// Location: src/main/java/com/chatify/chat_backend/security/JwtAuthenticationFilter.java
-
 package com.chatify.chat_backend.security;
 
 import jakarta.servlet.FilterChain;
@@ -21,25 +19,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtUtil jwtUtil;
     private final CustomUserDetailsService userDetailsService;
 
-    // ✅ Best Practice: Constructor Injection
     public JwtAuthenticationFilter(JwtUtil jwtUtil, CustomUserDetailsService userDetailsService) {
         this.jwtUtil = jwtUtil;
         this.userDetailsService = userDetailsService;
     }
-
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
 
         return path.startsWith("/ws")
-                || path.startsWith("/api/auth");
+                || path.startsWith("/api/auth")
+                || path.startsWith("/oauth2")
+                || path.startsWith("/login/oauth2");
     }
 
-
-    /**
-     * Filter method that runs once per request to validate JWT token
-     */
     @Override
     protected void doFilterInternal(
             HttpServletRequest request,
@@ -50,8 +44,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String jwt = parseJwt(request);
 
             if (jwt != null) {
-                // ✅ Extract email once and validate
-                String email = jwtUtil.extractUsername(jwt);  // This returns email now
+                String email = jwtUtil.extractUsername(jwt);
                 if (email != null && jwtUtil.isTokenValid(jwt, email)) {
                     UserDetails userDetails = userDetailsService.loadUserByUsername(email);
 
@@ -73,18 +66,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
-    /**
-     * Extract JWT token from Authorization header
-     *
-     * @param request HTTP request
-     * @return JWT token or null if not found
-     */
     private String parseJwt(HttpServletRequest request) {
         String headerAuth = request.getHeader("Authorization");
 
-        // ✅ Check if header exists and starts with "Bearer "
         if (headerAuth != null && headerAuth.startsWith("Bearer ")) {
-            return headerAuth.substring(7); // Remove "Bearer " prefix
+            return headerAuth.substring(7);
         }
 
         return null;

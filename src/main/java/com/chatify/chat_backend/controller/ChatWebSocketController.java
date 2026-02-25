@@ -6,19 +6,23 @@ import com.chatify.chat_backend.service.ChatRoomService;
 import com.chatify.chat_backend.service.MessageService;
 import com.chatify.chat_backend.service.PresenceService;
 import com.chatify.chat_backend.service.UserService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.simp.SimpMessageSendingOperations;
-import org.springframework.security.access.prepost.PreAuthorize; // NEW: Import for auth.
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Controller;
 
 import java.security.Principal;
 import java.time.LocalDateTime;
 
 @Controller
-@PreAuthorize("isAuthenticated()") // NEW: Class-level auth—blocks anon on all mappings.
+@PreAuthorize("isAuthenticated()")
 public class ChatWebSocketController {
+
+    private static final Logger log = LoggerFactory.getLogger(ChatWebSocketController.class);
 
     private final SimpMessageSendingOperations messagingTemplate;
     private final MessageService messageService;
@@ -27,10 +31,10 @@ public class ChatWebSocketController {
     private final PresenceService presenceService;
 
     public ChatWebSocketController(SimpMessageSendingOperations messagingTemplate,
-            MessageService messageService,
-            UserService userService,
-            ChatRoomService chatRoomService,
-            PresenceService presenceService) {
+                                   MessageService messageService,
+                                   UserService userService,
+                                   ChatRoomService chatRoomService,
+                                   PresenceService presenceService) {
         this.messagingTemplate = messagingTemplate;
         this.messageService = messageService;
         this.userService = userService;
@@ -64,33 +68,19 @@ public class ChatWebSocketController {
             @Payload SendMessageDTO sendMessageDTO,
             Principal principal) {
         if (principal == null) {
-            System.out.println("Principal is null - Message rejected");
+            log.warn("WebSocket message rejected: principal is null for room {}", roomId);
             return;
         }
 
-        // 1. Identify the Sender
         String email = principal.getName();
         User user = userService.getUserEntityByEmail(email);
 
-        // 2. Enforce the Room ID from the URL path
         sendMessageDTO.setChatRoomId(roomId);
 
-        // 3. Persist the Message (Save to DB)
         MessageDTO savedMessage = messageService.sendMessage(sendMessageDTO, user.getId());
 
-        // 4. Broadcast to Subscribers (The critical step!)
         messagingTemplate.convertAndSend("/topic/chatroom/" + roomId, savedMessage);
     }
-
-    // @MessageMapping("/chat.typing/{chatRoomId}")
-    // public void handleTyping(@DestinationVariable Long chatRoomId,
-    // @Payload TypingStatusDTO typingStatus,
-    // Principal principal) {
-    // if (principal == null) {
-    // return;
-    // }
-    //
-    // String email = principal.getName();
 
     @MessageMapping("/chat.read/{messageId}")
     public void handleReadReceipt(@DestinationVariable Long messageId, Principal principal) {
@@ -127,9 +117,6 @@ public class ChatWebSocketController {
         OnlineStatusDTO updatedStatus = presenceService.updateUserPresence(user.getId(), statusDTO.getStatus());
         presenceService.broadcastPresenceChange(updatedStatus);
     }
-
-    // REMOVED: /presence.connected and /presence.disconnected—duplicates
-    // EventListener, causes double broadcasts.
 
     @MessageMapping("/chat.delivered")
     public void handleDeliveredAck(

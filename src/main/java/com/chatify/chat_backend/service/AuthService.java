@@ -1,4 +1,3 @@
-// Location: src/main/java/com/chatify/chat_backend/service/AuthService.java
 package com.chatify.chat_backend.service;
 
 import com.chatify.chat_backend.dto.UserLoginDTO;
@@ -10,9 +9,6 @@ import com.chatify.chat_backend.repository.RefreshTokenRepository;
 import com.chatify.chat_backend.repository.UserRepository;
 import com.chatify.chat_backend.security.JwtUtil;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,27 +18,25 @@ import java.util.UUID;
 
 @Service
 public class AuthService {
-
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
-    private final AuthenticationManager authenticationManager;
+
 
     @Value("${app.jwt.refresh-token.expiration-ms}")
     private long refreshTokenExpirationMs;
 
+    // ✅ FIXED: Remove AuthenticationManager parameter
     public AuthService(
             UserRepository userRepository,
             RefreshTokenRepository refreshTokenRepository,
             PasswordEncoder passwordEncoder,
-            JwtUtil jwtUtil,
-            AuthenticationManager authenticationManager) {
+            JwtUtil jwtUtil) {  // ← Removed authenticationManager
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtil = jwtUtil;
-        this.authenticationManager = authenticationManager;
     }
 
     @Transactional
@@ -61,20 +55,24 @@ public class AuthService {
         return "User registered successfully";
     }
 
+    // ✅ FIXED: Remove authentication logic, just validate password manually
     @Transactional
     public AuthResponseDTO login(UserLoginDTO request) {
         String email = request.getEmail();
         String password = request.getPassword();
-        try {
-            User user = userRepository.findByEmail(email)
-                    .orElseThrow(() -> new RuntimeException("Invalid email or password"));
-            authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(email, password));
-            String accessToken = jwtUtil.generateToken(user.getEmail());
-            String refreshToken = generateRefreshToken(user);
-            return new AuthResponseDTO(accessToken, refreshToken, user.getUsername(), user.getEmail(), user.getId());
-        } catch (AuthenticationException e) {
-            throw new RuntimeException("Invalid email or password", e);
+
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("Invalid email or password"));
+
+        // ✅ Manually verify password instead of using AuthenticationManager
+        if (!passwordEncoder.matches(password, user.getPassword())) {
+            throw new RuntimeException("Invalid email or password");
         }
+
+        String accessToken = jwtUtil.generateToken(user.getEmail());
+        String refreshToken = generateRefreshToken(user);
+
+        return new AuthResponseDTO(accessToken, refreshToken, user.getUsername(), user.getEmail(), user.getId());
     }
 
     private String generateRefreshToken(User user) {
@@ -94,7 +92,7 @@ public class AuthService {
                 .map(refreshToken -> {
                     User user = refreshToken.getUser();
                     refreshTokenRepository.delete(refreshToken);
-                    String accessToken = jwtUtil.generateToken(user.getEmail()); // Changed from user.getUsername()
+                    String accessToken = jwtUtil.generateToken(user.getEmail());
                     String newRefreshToken = generateRefreshToken(user);
                     return new AuthResponseDTO(accessToken, newRefreshToken, user.getUsername(), user.getEmail(),
                             user.getId());
@@ -116,5 +114,39 @@ public class AuthService {
             int deletedCount = refreshTokenRepository.deleteAllByUser(user);
             System.out.println("Deleted " + deletedCount + " refresh tokens for user: " + email);
         });
+    }
+
+    @Transactional
+    public String loginOrRegisterOAuthUser(String email, String name, String googleId, String picture) {
+        User user = userRepository.findByEmail(email).orElseGet(() -> {
+            User newUser = new User();
+            newUser.setEmail(email);
+            newUser.setUsername(generateUniqueUsername(name));
+            newUser.setPassword(null); // OAuth users have no password
+            newUser.setProvider("google");
+            newUser.setProviderId(googleId);
+            newUser.setProfilePicture(picture);
+            return userRepository.save(newUser);
+        });
+
+        // If user exists but signed up locally, link their Google account
+        if ("local".equals(user.getProvider())) {
+            user.setProviderId(googleId);
+            user.setProvider("google");
+            userRepository.save(user);
+        }
+
+        return jwtUtil.generateToken(user.getEmail());
+    }
+
+    private String generateUniqueUsername(String name) {
+        String base = name.toLowerCase().replaceAll("[^a-z0-9]", "");
+        if (base.isEmpty()) base = "user";
+        String username = base;
+        int counter = 1;
+        while (userRepository.findByUsername(username).isPresent()) {
+            username = base + counter++;
+        }
+        return username;
     }
 }

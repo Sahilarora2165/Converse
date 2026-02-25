@@ -55,4 +55,10 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
 
   Optional<Message> findTopByChatRoomOrderByTimestampDesc(ChatRoom chatRoom);
 
+    long countByChatRoomIdAndIdGreaterThanAndSenderIdNot(
+            Long chatRoomId,
+            Long lastReadMessageId,
+            Long senderId
+    );
+
 }

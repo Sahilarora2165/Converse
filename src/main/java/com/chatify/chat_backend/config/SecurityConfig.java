@@ -2,6 +2,7 @@ package com.chatify.chat_backend.config;
 
 import com.chatify.chat_backend.security.CustomUserDetailsService;
 import com.chatify.chat_backend.security.JwtAuthenticationFilter;
+import com.chatify.chat_backend.security.OAuth2SuccessHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -10,7 +11,6 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
@@ -26,65 +26,51 @@ public class SecurityConfig {
 
     private final CustomUserDetailsService userDetailsService;
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final OAuth2SuccessHandler oAuth2SuccessHandler;
+    private final PasswordEncoder passwordEncoder; // INJECTED, not defined here
 
     public SecurityConfig(
             CustomUserDetailsService userDetailsService,
-            JwtAuthenticationFilter jwtAuthenticationFilter
+            JwtAuthenticationFilter jwtAuthenticationFilter,
+            OAuth2SuccessHandler oAuth2SuccessHandler,
+            PasswordEncoder passwordEncoder
     ) {
         this.userDetailsService = userDetailsService;
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+        this.oAuth2SuccessHandler = oAuth2SuccessHandler;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-
         http
-                // CORS (DEV ONLY – restrict in prod)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-
-                // Stateless API
                 .csrf(csrf -> csrf.disable())
-
                 .sessionManagement(session ->
-                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                        session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
                 )
-
-                // Authorization rules
                 .authorizeHttpRequests(auth -> auth
-                        // WebSocket handshake (NO HTTP security)
                         .requestMatchers("/ws/**").permitAll()
-
-                        // Auth endpoints
                         .requestMatchers("/api/auth/**").permitAll()
-
-                        // Static / uploads
                         .requestMatchers("/uploads/**").permitAll()
-
-                        // Everything else needs JWT
+                        .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
                         .anyRequest().authenticated()
                 )
-
-                // DAO auth (used by AuthenticationManager)
                 .authenticationProvider(authenticationProvider())
-
-                // JWT filter for REST APIs ONLY
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                .oauth2Login(oauth2 -> oauth2
+                        .successHandler(oAuth2SuccessHandler)
+                        .failureUrl("/login?error=oauth2")
+                );
 
         return http.build();
-    }
-
-    // ===================== Beans =====================
-
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
     }
 
     @Bean
     public DaoAuthenticationProvider authenticationProvider() {
         DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
         provider.setUserDetailsService(userDetailsService);
-        provider.setPasswordEncoder(passwordEncoder());
+        provider.setPasswordEncoder(passwordEncoder); // uses injected field now
         return provider;
     }
 
@@ -94,7 +80,6 @@ public class SecurityConfig {
         return configuration.getAuthenticationManager();
     }
 
-    // DEV ONLY – tighten in production
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
@@ -102,7 +87,6 @@ public class SecurityConfig {
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);
-
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
         return source;

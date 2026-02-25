@@ -28,11 +28,17 @@ public class User {
     @Column(nullable = false, unique = true)
     private String email;
 
-    @Column(nullable = false)
+    @Column(nullable = true)
     private String password;
 
     @Column(name = "profile_picture")
     private String profilePicture;
+
+    @Column(nullable = false, columnDefinition = "varchar(255) default 'local'")
+    private String provider = "local";
+
+    @Column(name = "provider_id")
+    private String providerId; // Google's "sub" field
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

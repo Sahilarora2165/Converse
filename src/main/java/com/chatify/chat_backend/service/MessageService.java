@@ -53,13 +53,7 @@ public class MessageService {
         message.setSender(sender);
         message.setChatRoom(chatRoom);
 
-        // FIXED: Messages start as SENT, not SEEN
         message.setStatus(MessageStatus.SENT);
-
-        // REMOVED: Do NOT auto-mark sender's messages as SEEN
-        // The sender doesn't need to "see" their own message
-        // Status will update to DELIVERED/SEEN when recipient interacts
-
         Message savedMessage = messageRepository.save(message);
         return mapToDTO(savedMessage);
     }
@@ -127,8 +121,6 @@ public class MessageService {
 
         LocalDateTime now = LocalDateTime.now();
         for (Message message : unreadMessages) {
-            // FIXED: Only mark OTHER people's messages as read
-            // Don't add yourself to readBy for your own messages
             if (!message.getSender().getId().equals(userId)) {
                 message.getReadBy().add(user);
                 message.setStatus(MessageStatus.SEEN);

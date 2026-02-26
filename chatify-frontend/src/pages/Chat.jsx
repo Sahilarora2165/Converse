@@ -154,7 +154,6 @@ const Chat = () => {
 
     const loadHistoryAndSubscribe = async () => {
       try {
-        console.log('[HISTORY] Loading chat history for room:', chatId);
 
         // STEP 1: Load message history
         const { data } = await getChatHistory(chatId);
@@ -222,7 +221,6 @@ const Chat = () => {
                 return shouldUpdate ? { ...msg, status: 'DELIVERED' } : msg;
               });
 
-              console.log('[DELIVERY UPDATE] Updated message statuses:',
                 updated.filter(m => m.senderId === user?.id).map(m => ({ id: m.id, status: m.status }))
               );
 
@@ -249,7 +247,6 @@ const Chat = () => {
                 return shouldUpdate ? { ...msg, status: 'SEEN' } : msg;
               });
 
-              console.log('[SEEN UPDATE] Updated message statuses:',
                 updated.filter(m => m.senderId === user?.id).map(m => ({ id: m.id, status: m.status }))
               );
 
@@ -258,7 +255,6 @@ const Chat = () => {
           });
         }
 
-        console.log('[INIT] All subscriptions complete for room:', chatId);
 
       } catch (err) {
         console.error("[ERROR] Failed to load chat history or subscribe", err);
@@ -269,7 +265,6 @@ const Chat = () => {
     loadHistoryAndSubscribe();
 
     return () => {
-      console.log('[CLEANUP] Unsubscribing from room:', chatId);
       subscriptionRef.current?.unsubscribe();
       deliverySubRef.current?.unsubscribe();
       seenSubRef.current?.unsubscribe();
@@ -280,7 +275,6 @@ const Chat = () => {
     e.preventDefault();
     if (!newMessage.trim() || !isConnected) return;
 
-    console.log('[SEND] Sending message:', newMessage.trim());
     sendMessage(chatId, newMessage.trim());
     setNewMessage("");
   };

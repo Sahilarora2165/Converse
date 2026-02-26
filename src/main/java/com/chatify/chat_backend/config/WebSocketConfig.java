@@ -78,7 +78,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                     log.debug("WebSocket CONNECT request received");
 
                     if (authHeader != null && authHeader.toLowerCase().startsWith("bearer")) {
-                        String token = authHeader.replace("Bearer", "").trim();
+                        String token = authHeader.substring(6).trim();
 
                         try {
                             String email = jwtUtil.extractUsername(token);

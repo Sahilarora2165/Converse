@@ -33,10 +33,10 @@ const Chat = () => {
   const seenSubRef = useRef(null);
   const isChatActiveRef = useRef(false);
 
-  const currentRoom = rooms.find(r => String(r.id) === String(chatId));
+  const currentRoom = rooms?.find(r => String(r.id) === String(chatId));
 
-  const otherUser = currentRoom && !currentRoom.isGroupChat
-    ? currentRoom.participants.find(p => String(p.id) !== String(user?.id))
+  const otherUser = currentRoom && !currentRoom?.isGroupChat
+    ? currentRoom?.participants?.find(p => String(p.id) !== String(user?.id))
     : null;
 
   const isOtherUserOnline = otherUser?.status === 'ONLINE';
@@ -154,6 +154,7 @@ const Chat = () => {
 
     const loadHistoryAndSubscribe = async () => {
       try {
+        console.log('[HISTORY] Loading chat history for room:', chatId);
 
         // STEP 1: Load message history
         const { data } = await getChatHistory(chatId);
@@ -207,6 +208,7 @@ const Chat = () => {
         deliverySubRef.current?.unsubscribe();
         if (subscribeToDelivery) {
           deliverySubRef.current = subscribeToDelivery(chatId, (update) => {
+            console.log('[DELIVERY UPDATE] Will update messages ≤', update.lastDeliveredMessageId);
 
             setMessages(prev => {
               const updated = prev.map(msg => {
@@ -221,6 +223,7 @@ const Chat = () => {
                 return shouldUpdate ? { ...msg, status: 'DELIVERED' } : msg;
               });
 
+              console.log('[DELIVERY UPDATE] Updated message statuses:',
                 updated.filter(m => m.senderId === user?.id).map(m => ({ id: m.id, status: m.status }))
               );
 
@@ -232,7 +235,10 @@ const Chat = () => {
         // STEP 7: Subscribe to seen status updates
         seenSubRef.current?.unsubscribe();
         if (subscribeToSeen) {
+          console.log('[SUBSCRIBE] Subscribing to seen updates for room:', chatId);
           seenSubRef.current = subscribeToSeen(chatId, (update) => {
+            console.log('[SEEN UPDATE] Received:', update);
+            console.log('[SEEN UPDATE] Will update messages ≤', update.lastSeenMessageId);
 
             setMessages(prev => {
               const updated = prev.map(msg => {
@@ -247,6 +253,7 @@ const Chat = () => {
                 return shouldUpdate ? { ...msg, status: 'SEEN' } : msg;
               });
 
+              console.log('[SEEN UPDATE] Updated message statuses:',
                 updated.filter(m => m.senderId === user?.id).map(m => ({ id: m.id, status: m.status }))
               );
 
@@ -255,6 +262,7 @@ const Chat = () => {
           });
         }
 
+        console.log('[INIT] All subscriptions complete for room:', chatId);
 
       } catch (err) {
         console.error("[ERROR] Failed to load chat history or subscribe", err);
@@ -265,6 +273,7 @@ const Chat = () => {
     loadHistoryAndSubscribe();
 
     return () => {
+      console.log('[CLEANUP] Unsubscribing from room:', chatId);
       subscriptionRef.current?.unsubscribe();
       deliverySubRef.current?.unsubscribe();
       seenSubRef.current?.unsubscribe();
@@ -275,6 +284,7 @@ const Chat = () => {
     e.preventDefault();
     if (!newMessage.trim() || !isConnected) return;
 
+    console.log('[SEND] Sending message:', newMessage.trim());
     sendMessage(chatId, newMessage.trim());
     setNewMessage("");
   };

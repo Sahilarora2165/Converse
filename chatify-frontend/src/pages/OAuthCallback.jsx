@@ -1,41 +1,53 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import api from '../services/api';
 
 const OAuthCallback = () => {
-    const navigate = useNavigate();
-    const { login } = useAuth();
+    const navigate   = useNavigate();
+    const { login }  = useAuth();
+    const calledRef  = useRef(false); // Prevent double-call in React StrictMode
 
     useEffect(() => {
-        // Parse from URL fragment (#) instead of query string (?)
-        // Fragment is never sent to the server — more secure for tokens
-        const hash = window.location.hash.substring(1); // Remove the leading '#'
-        const params = new URLSearchParams(hash);
+        if (calledRef.current) return;
+        calledRef.current = true;
 
-        const token    = params.get('token');
-        const id       = params.get('id');
-        const username = params.get('username');
-        const email    = params.get('email');
+        const exchangeToken = async () => {
+            // Check if backend signalled an error via query param
+            const params = new URLSearchParams(window.location.search);
+            const error  = params.get('error');
+            if (error) {
+                navigate('/login?error=' + error);
+                return;
+            }
 
-        if (!token || !id || !username || !email) {
-            navigate('/login');
-            return;
-        }
+            try {
+                // Exchange the HttpOnly cookie for JWT tokens.
+                // The cookie (oauth2_pending) was set by OAuth2SuccessHandler and is
+                // automatically sent by the browser with this request.
+                // withCredentials: true ensures cookies are sent cross-origin if needed.
+                const response = await api.get('/auth/oauth2/token', {
+                    withCredentials: true
+                });
 
-        const userData = {
-            id: parseInt(id),
-            username,
-            email,
-            accessToken: token
+                const { accessToken, refreshToken, username, email, id } = response.data;
+
+                if (!accessToken || !refreshToken) {
+                    navigate('/login?error=oauth2_failed');
+                    return;
+                }
+
+                const userData = { id, username, email };
+                login(userData, accessToken, refreshToken);
+                navigate('/chat');
+
+            } catch (err) {
+                console.error('OAuth2 token exchange failed:', err);
+                navigate('/login?error=oauth2_failed');
+            }
         };
 
-        login(userData, token);
-
-        // Clear the fragment from the URL to remove the token from browser history
-        window.history.replaceState(null, '', window.location.pathname);
-
-        navigate('/chat');
-
+        exchangeToken();
     }, [login, navigate]);
 
     return (

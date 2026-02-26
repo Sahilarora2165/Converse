@@ -32,17 +32,15 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       UPLOAD_DIR: /app/uploads
-
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
-      APP_OAUTH2_REDIRECT_URI: http://localhost/oauth2/callback
+      OAUTH2_REDIRECT_URI: http://localhost/oauth2/callback
 
     volumes:
       - uploads_data:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
-
 
   frontend:
     build:

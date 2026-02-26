@@ -7,30 +7,31 @@ export const useAuth = () => {
 };
 
 export const AuthProvider = ({ children }) => {
-    const [user, setUser] = useState(null);
-    const [token, setToken] = useState(localStorage.getItem('token'));
+    const [user, setUser]       = useState(null);
+    const [token, setToken]     = useState(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         try {
-            const storedUser = localStorage.getItem('user');
+            const storedUser  = localStorage.getItem('user');
             const storedToken = localStorage.getItem('token');
             if (storedUser && storedToken) {
                 setUser(JSON.parse(storedUser));
                 setToken(storedToken);
             }
         } catch (e) {
-            // Corrupted localStorage data — clear and start fresh
             localStorage.removeItem('token');
+            localStorage.removeItem('refreshToken');
             localStorage.removeItem('user');
         }
         setLoading(false);
     }, []);
 
-    const login = (userData, newToken) => {
+    const login = (userData, accessToken, refreshToken) => {
         setUser(userData);
-        setToken(newToken);
-        localStorage.setItem('token', newToken);
+        setToken(accessToken);
+        localStorage.setItem('token', accessToken);
+        localStorage.setItem('refreshToken', refreshToken);
         localStorage.setItem('user', JSON.stringify(userData));
     };
 
@@ -38,8 +39,11 @@ export const AuthProvider = ({ children }) => {
         setUser(null);
         setToken(null);
         localStorage.removeItem('token');
+        localStorage.removeItem('refreshToken');
         localStorage.removeItem('user');
     };
+
+    if (loading) return null;
 
     return (
         <AuthContext.Provider value={{ user, token, login, logout, loading, isAuthenticated: !!user }}>

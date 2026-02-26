@@ -1,8 +1,9 @@
 package com.chatify.chat_backend.security;
 
-import com.chatify.chat_backend.entity.User;
-import com.chatify.chat_backend.repository.UserRepository;
+import com.chatify.chat_backend.dto.AuthResponseDTO;
 import com.chatify.chat_backend.service.AuthService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -14,29 +15,31 @@ import org.springframework.security.web.authentication.SimpleUrlAuthenticationSu
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 
 @Component
 public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
 
     private static final Logger log = LoggerFactory.getLogger(OAuth2SuccessHandler.class);
+    private static final String COOKIE_NAME = "oauth2_pending";
+    private static final int COOKIE_MAX_AGE = 120; // 2 minutes — single-use window
 
     private final AuthService authService;
-    private final UserRepository userRepository;
+    private final ObjectMapper objectMapper;
 
     @Value("${app.oauth2.redirect-uri}")
     private String redirectUri;
 
-    public OAuth2SuccessHandler(AuthService authService, UserRepository userRepository) {
+    public OAuth2SuccessHandler(AuthService authService, ObjectMapper objectMapper) {
         this.authService = authService;
-        this.userRepository = userRepository;
+        this.objectMapper = objectMapper;
     }
 
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request,
                                         HttpServletResponse response,
                                         Authentication authentication) throws IOException {
+
         OAuth2User oAuth2User = (OAuth2User) authentication.getPrincipal();
 
         String email    = oAuth2User.getAttribute("email");
@@ -45,24 +48,37 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
         String picture  = oAuth2User.getAttribute("picture");
 
         if (email == null) {
-            log.error("OAuth2 login failed: email attribute is null");
-            getRedirectStrategy().sendRedirect(request, response, redirectUri + "?error=oauth2_email_missing");
+            log.error("OAuth2 login failed: email attribute missing from Google response");
+            response.sendRedirect(redirectUri + "?error=oauth2_email_missing");
             return;
         }
 
-        String token = authService.loginOrRegisterOAuthUser(email, name, googleId, picture);
+        try {
+            AuthResponseDTO authResponse = authService.loginOrRegisterOAuthUser(email, name, googleId, picture);
 
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("User not found after OAuth"));
+            // Serialize auth data to JSON, then Base64 encode it
+            // Stored in HttpOnly cookie — JavaScript cannot read it directly
+            String json        = objectMapper.writeValueAsString(authResponse);
+            String cookieValue = Base64.getEncoder().encodeToString(json.getBytes());
 
-        // Use URL fragment (#) instead of query string (?) so the token is NOT sent to the server
-        // in subsequent requests and does NOT appear in server access logs
-        String redirectUrl = redirectUri
-                + "#token=" + token
-                + "&id=" + user.getId()
-                + "&username=" + URLEncoder.encode(user.getUsername(), StandardCharsets.UTF_8)
-                + "&email=" + URLEncoder.encode(user.getEmail(), StandardCharsets.UTF_8);
+            // Build HttpOnly cookie manually for full control over attributes
+            // HttpOnly = JS cannot access, short-lived = 2 min, SameSite=Lax = survives Google redirect
+            Cookie cookie = new Cookie(COOKIE_NAME, cookieValue);
+            cookie.setHttpOnly(true);
+            cookie.setMaxAge(COOKIE_MAX_AGE);
+            cookie.setPath("/api/auth/oauth2/token"); // Scoped — only sent to the exchange endpoint
+            cookie.setAttribute("SameSite", "Lax");
+            response.addCookie(cookie);
 
-        getRedirectStrategy().sendRedirect(request, response, redirectUrl);
+            log.info("OAuth2 success for: {} — pending cookie set, redirecting to callback", email);
+
+            // Redirect to frontend callback page — NO tokens in URL, no fragment, nothing to encode
+            // OAuthCallback.jsx will call GET /api/auth/oauth2/token to exchange the cookie for tokens
+            response.sendRedirect(redirectUri);
+
+        } catch (Exception e) {
+            log.error("OAuth2 processing failed for email: {}", email, e);
+            response.sendRedirect(redirectUri + "?error=oauth2_processing_failed");
+        }
     }
 }

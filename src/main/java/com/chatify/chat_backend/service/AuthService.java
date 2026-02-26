@@ -71,54 +71,17 @@ public class AuthService {
         }
 
         String accessToken = jwtUtil.generateToken(user.getEmail());
-        String refreshToken = generateRefreshToken(user);
+        String refreshToken = generateAndSaveRefreshToken(user);
 
         return new AuthResponseDTO(accessToken, refreshToken, user.getUsername(), user.getEmail(), user.getId());
     }
 
-    private String generateRefreshToken(User user) {
-        refreshTokenRepository.deleteAllByUser(user);
-        RefreshToken refreshToken = new RefreshToken();
-        refreshToken.setUser(user);
-        refreshToken.setToken(UUID.randomUUID().toString());
-        refreshToken.setExpiryDate(Instant.now().plusMillis(refreshTokenExpirationMs));
-        refreshTokenRepository.save(refreshToken);
-        return refreshToken.getToken();
-    }
-
+    /**
+     * FIX: Now returns full AuthResponseDTO (with refresh token) instead of just String.
+     * OAuth2 users were previously stuck with no refresh token — token expiry = forced logout.
+     */
     @Transactional
-    public AuthResponseDTO refreshToken(String requestRefreshToken) {
-        return refreshTokenRepository.findByToken(requestRefreshToken)
-                .map(this::verifyExpiration)
-                .map(refreshToken -> {
-                    User user = refreshToken.getUser();
-                    refreshTokenRepository.delete(refreshToken);
-                    String accessToken = jwtUtil.generateToken(user.getEmail());
-                    String newRefreshToken = generateRefreshToken(user);
-                    return new AuthResponseDTO(accessToken, newRefreshToken, user.getUsername(), user.getEmail(),
-                            user.getId());
-                })
-                .orElseThrow(() -> new RuntimeException("Refresh token not found"));
-    }
-
-    private RefreshToken verifyExpiration(RefreshToken token) {
-        if (token.getExpiryDate().compareTo(Instant.now()) < 0) {
-            refreshTokenRepository.delete(token);
-            throw new RuntimeException("Refresh token expired");
-        }
-        return token;
-    }
-
-    @Transactional
-    public void logout(String email) {
-        userRepository.findByEmail(email).ifPresent(user -> {
-            int deletedCount = refreshTokenRepository.deleteAllByUser(user);
-            log.info("Deleted {} refresh tokens for user: {}", deletedCount, email);
-        });
-    }
-
-    @Transactional
-    public String loginOrRegisterOAuthUser(String email, String name, String googleId, String picture) {
+    public AuthResponseDTO loginOrRegisterOAuthUser(String email, String name, String googleId, String picture) {
         User user = userRepository.findByEmail(email).orElseGet(() -> {
             User newUser = new User();
             newUser.setEmail(email);
@@ -140,7 +103,50 @@ public class AuthService {
             userRepository.save(user);
         }
 
-        return jwtUtil.generateToken(user.getEmail());
+        String accessToken = jwtUtil.generateToken(user.getEmail());
+        String refreshToken = generateAndSaveRefreshToken(user);
+
+        return new AuthResponseDTO(accessToken, refreshToken, user.getUsername(), user.getEmail(), user.getId());
+    }
+
+    private String generateAndSaveRefreshToken(User user) {
+        refreshTokenRepository.deleteAllByUser(user);
+        RefreshToken refreshToken = new RefreshToken();
+        refreshToken.setUser(user);
+        refreshToken.setToken(UUID.randomUUID().toString());
+        refreshToken.setExpiryDate(Instant.now().plusMillis(refreshTokenExpirationMs));
+        refreshTokenRepository.save(refreshToken);
+        return refreshToken.getToken();
+    }
+
+    @Transactional
+    public AuthResponseDTO refreshToken(String requestRefreshToken) {
+        return refreshTokenRepository.findByToken(requestRefreshToken)
+                .map(this::verifyExpiration)
+                .map(refreshToken -> {
+                    User user = refreshToken.getUser();
+                    refreshTokenRepository.delete(refreshToken);
+                    String accessToken = jwtUtil.generateToken(user.getEmail());
+                    String newRefreshToken = generateAndSaveRefreshToken(user);
+                    return new AuthResponseDTO(accessToken, newRefreshToken, user.getUsername(), user.getEmail(), user.getId());
+                })
+                .orElseThrow(() -> new RuntimeException("Refresh token not found"));
+    }
+
+    private RefreshToken verifyExpiration(RefreshToken token) {
+        if (token.getExpiryDate().compareTo(Instant.now()) < 0) {
+            refreshTokenRepository.delete(token);
+            throw new RuntimeException("Refresh token expired. Please log in again.");
+        }
+        return token;
+    }
+
+    @Transactional
+    public void logout(String email) {
+        userRepository.findByEmail(email).ifPresent(user -> {
+            int deletedCount = refreshTokenRepository.deleteAllByUser(user);
+            log.info("Deleted {} refresh tokens for user: {}", deletedCount, email);
+        });
     }
 
     private String generateUniqueUsername(String name) {

@@ -21,11 +21,9 @@ const Login = () => {
 
         try {
             const response = await loginAPI(email, password);
-            const token = response.data.accessToken;
 
-            if (!token) throw new Error();
 
-            login(response.data, token);
+            login(response.data, response.data.accessToken, response.data.refreshToken);
             navigate('/chat');
         } catch {
             setError('Invalid email or password.');

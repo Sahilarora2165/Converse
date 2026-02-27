@@ -32,10 +32,14 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       UPLOAD_DIR: /app/uploads
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
-      OAUTH2_REDIRECT_URI: http://localhost/oauth2/callback
-
+      # Google OAuth2 credentials
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      # Custom app properties — variable names MUST match Spring relaxed binding
+      APP_OAUTH2_REDIRECT_URI: http://localhost/auth/callback
+      APP_JWT_REFRESH_TOKEN_EXPIRATION_MS: 604800000
+      # CORS — include http://localhost for Docker nginx
+      CORS_ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173,http://localhost
     volumes:
       - uploads_data:/app/uploads
     depends_on:

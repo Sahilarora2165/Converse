@@ -22,7 +22,7 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
 
     private static final Logger log = LoggerFactory.getLogger(OAuth2SuccessHandler.class);
     private static final String COOKIE_NAME = "oauth2_pending";
-    private static final int COOKIE_MAX_AGE = 120; // 2 minutes — single-use window
+    private static final int COOKIE_MAX_AGE = 120; // 2 minutes
 
     private final AuthService authService;
     private final ObjectMapper objectMapper;
@@ -56,25 +56,29 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
         try {
             AuthResponseDTO authResponse = authService.loginOrRegisterOAuthUser(email, name, googleId, picture);
 
-            // Serialize auth data to JSON, then Base64 encode it
-            // Stored in HttpOnly cookie — JavaScript cannot read it directly
             String json        = objectMapper.writeValueAsString(authResponse);
             String cookieValue = Base64.getEncoder().encodeToString(json.getBytes());
 
-            // Build HttpOnly cookie manually for full control over attributes
-            // HttpOnly = JS cannot access, short-lived = 2 min, SameSite=Lax = survives Google redirect
+
+            Cookie existingCookie = new Cookie(COOKIE_NAME, null);
+            existingCookie.setPath("/");
+            existingCookie.setMaxAge(0);
+            response.addCookie(existingCookie);
+
+
             Cookie cookie = new Cookie(COOKIE_NAME, cookieValue);
             cookie.setHttpOnly(true);
             cookie.setMaxAge(COOKIE_MAX_AGE);
-            cookie.setPath("/api/auth/oauth2/token"); // Scoped — only sent to the exchange endpoint
+            cookie.setPath("/");
             cookie.setAttribute("SameSite", "Lax");
+            cookie.setSecure(false);
+
             response.addCookie(cookie);
 
             log.info("OAuth2 success for: {} — pending cookie set, redirecting to callback", email);
 
-            // Redirect to frontend callback page — NO tokens in URL, no fragment, nothing to encode
-            // OAuthCallback.jsx will call GET /api/auth/oauth2/token to exchange the cookie for tokens
-            response.sendRedirect(redirectUri);
+
+            response.sendRedirect(redirectUri + "?t=" + System.currentTimeMillis());
 
         } catch (Exception e) {
             log.error("OAuth2 processing failed for email: {}", email, e);

@@ -12,7 +12,7 @@ import java.util.Collections;
 import java.util.Optional;
 
 @Service
-public class CustomUserDetailsService implements UserDetailsService { // ✅ must implement UserDetailsService
+public class CustomUserDetailsService implements UserDetailsService {
     private final UserRepository userRepository;
 
     // Constructor injection
@@ -31,10 +31,10 @@ public class CustomUserDetailsService implements UserDetailsService { // ✅ mus
 
         User user = userOpt.get();
 
-        // ✅ Return EMAIL as principal (to match JWT)
+
         return new org.springframework.security.core.userdetails.User(
                 user.getEmail(),
-                user.getPassword(),
+                user.getPassword() != null ? user.getPassword() : "",
                 Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER"))
         );
     }

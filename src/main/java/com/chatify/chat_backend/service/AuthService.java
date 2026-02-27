@@ -28,7 +28,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
 
-    @Value("${app.jwt.refresh-token.expiration-ms}")
+    @Value("${app.jwt.refresh-token.expiration-ms:604800000}")
     private long refreshTokenExpirationMs;
 
     public AuthService(

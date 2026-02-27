@@ -12,7 +12,7 @@ function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
-        <Route path="/oauth2/callback" element={<OAuthCallback />} />
+        <Route path="/auth/callback" element={<OAuthCallback />} />
 
         <Route path="/chat">
           <Route index element={<PrivateRoute><Chat /></PrivateRoute>} />

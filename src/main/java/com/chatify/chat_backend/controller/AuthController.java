@@ -70,7 +70,6 @@ public class AuthController {
     public ResponseEntity<?> exchangeOAuth2Token(HttpServletRequest request,
                                                  HttpServletResponse response) {
         try {
-            // Find the pending OAuth2 cookie
             Cookie[] cookies = request.getCookies();
             if (cookies == null) {
                 return ResponseEntity.status(401)
@@ -87,18 +86,18 @@ public class AuthController {
                         .body(Map.of("error", "OAuth2 session expired or not found. Please try logging in again."));
             }
 
-            // Decode and deserialize the auth response from the cookie
-            byte[] decoded = Base64.getDecoder().decode(pendingCookie.getValue());
+            // Decode — handle URL-encoded Base64 value
+            String rawValue = java.net.URLDecoder.decode(pendingCookie.getValue(), java.nio.charset.StandardCharsets.UTF_8);
+            byte[] decoded = Base64.getDecoder().decode(rawValue);
             AuthResponseDTO authResponse = objectMapper.readValue(decoded, AuthResponseDTO.class);
 
-            // Immediately delete the cookie — single use, cannot be replayed
+            // Delete the cookie — path MUST match what was set (now "/")
             Cookie deleteCookie = new Cookie(OAUTH2_COOKIE_NAME, "");
             deleteCookie.setHttpOnly(true);
-            deleteCookie.setMaxAge(0); // Delete immediately
-            deleteCookie.setPath("/api/auth/oauth2/token");
+            deleteCookie.setMaxAge(0);
+            deleteCookie.setPath("/");
             response.addCookie(deleteCookie);
 
-            // Return tokens as normal JSON — frontend stores them in localStorage
             return ResponseEntity.ok(authResponse);
 
         } catch (Exception e) {

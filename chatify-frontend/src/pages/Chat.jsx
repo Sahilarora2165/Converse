@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import useAuth from "../hooks/useAuth";
 import useWebSocket from "../hooks/useWebSocket";
-import { getChatRooms, getChatHistory } from "../services/api";
+import { getChatRooms, getChatHistory, markMessagesAsRead } from "../services/api";
 import api from "../services/api";
 import NewChatModal from "../components/NewChatModal";
 import ChatSidebar from "../components/ChatSidebar";
 import MessageItem from "../components/Chat/MessageItem";
+import toast from 'react-hot-toast';
 
 const Chat = () => {
   const { user } = useAuth();
@@ -19,6 +20,7 @@ const Chat = () => {
     sendDeliveryAck,
     sendSeenAck
   } = useWebSocket();
+
   const { chatId } = useParams();
   const navigate = useNavigate();
 
@@ -26,28 +28,49 @@ const Chat = () => {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
   const [showNewChatModal, setShowNewChatModal] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const messagesEndRef = useRef(null);
   const subscriptionRef = useRef(null);
   const deliverySubRef = useRef(null);
   const seenSubRef = useRef(null);
   const isChatActiveRef = useRef(false);
+  const isLoadingRef = useRef(false);
+  const previousChatIdRef = useRef(null);
 
   const currentRoom = rooms?.find(r => String(r.id) === String(chatId));
-
   const otherUser = currentRoom && !currentRoom?.isGroupChat
     ? currentRoom?.participants?.find(p => String(p.id) !== String(user?.id))
     : null;
-
   const isOtherUserOnline = otherUser?.status === 'ONLINE';
 
+  // ✅ EXPOSED FUNCTION - Refresh rooms from API (called after marking messages as read)
+  const fetchRooms = useCallback(async () => {
+    try {
+      const { data } = await getChatRooms();
+      const sorted = [...data].sort((a, b) => {
+        const timeA = a.lastMessageTimestamp || a.createdAt;
+        const timeB = b.lastMessageTimestamp || b.createdAt;
+        return new Date(timeB) - new Date(timeA);
+      });
+      setRooms(sorted);
+    } catch (err) {
+      console.error("Failed to load rooms", err);
+    }
+  }, []);
+
+  // ✅ Initial rooms fetch
+  useEffect(() => {
+    fetchRooms();
+  }, [fetchRooms]);
+
+  // ✅ Format relative time for last seen
   const formatRelativeTime = (dateString) => {
     if (!dateString) return 'Offline';
     const date = new Date(dateString);
     const now = new Date();
     const diffMs = now - date;
     const diffMin = Math.floor(diffMs / 60000);
-
     if (diffMin < 1) return 'just now';
     if (diffMin < 60) return `${diffMin} min ago`;
     const diffHr = Math.floor(diffMin / 60);
@@ -56,12 +79,12 @@ const Chat = () => {
     return `${diffDays} ${diffDays === 1 ? 'day' : 'days'} ago`;
   };
 
+  // ✅ Format date separator
   const formatDateSeparator = (dateString) => {
     const msgDate = new Date(dateString);
     const today = new Date();
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
-
     const msgDateOnly = new Date(msgDate.getFullYear(), msgDate.getMonth(), msgDate.getDate());
     const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const yesterdayOnly = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
@@ -75,13 +98,12 @@ const Chat = () => {
     }
   };
 
+  // ✅ Group messages by date
   const groupMessagesByDate = (messages) => {
     const grouped = [];
     let lastDate = null;
-
     messages.forEach((msg) => {
       const msgDate = new Date(msg.timestamp).toDateString();
-
       if (msgDate !== lastDate) {
         grouped.push({
           type: 'date-separator',
@@ -90,29 +112,17 @@ const Chat = () => {
         });
         lastDate = msgDate;
       }
-
       grouped.push({ type: 'message', ...msg });
     });
-
     return grouped;
   };
 
+  // ✅ Scroll to bottom
   const scrollToBottom = useCallback((behavior = "smooth") => {
     messagesEndRef.current?.scrollIntoView({ behavior });
   }, []);
 
-  const fetchRooms = async () => {
-    try {
-      const { data } = await getChatRooms();
-      setRooms(data);
-    } catch (err) {
-      console.error("Failed to load rooms", err);
-    }
-  };
-
-  useEffect(() => { fetchRooms(); }, []);
-
-  // Track chat focus for seen status
+  // ✅ Track chat focus for seen status
   useEffect(() => {
     const handleFocus = () => {
       isChatActiveRef.current = true;
@@ -123,7 +133,6 @@ const Chat = () => {
         }
       }
     };
-
     const handleBlur = () => {
       isChatActiveRef.current = false;
     };
@@ -138,9 +147,9 @@ const Chat = () => {
     };
   }, [chatId, messages, sendSeenAck]);
 
-  // Load history + subscribe to updates
+  // ✅ Load history + subscribe to updates + Mark as read + Refresh sidebar
   useEffect(() => {
-    // CRITICAL: Don't proceed if WebSocket is not connected - subscriptions will fail
+    // CRITICAL: Don't proceed if WebSocket is not connected
     if (!chatId || !isConnected) {
       if (!chatId) {
         setMessages([]);
@@ -148,11 +157,20 @@ const Chat = () => {
         deliverySubRef.current?.unsubscribe();
         seenSubRef.current?.unsubscribe();
       }
-      // If just not connected yet, wait - effect will re-run when isConnected changes
       return;
     }
 
+    // ✅ Prevent duplicate loads for same chatId
+    if (previousChatIdRef.current === chatId && !isLoadingRef.current) {
+      return;
+    }
+    previousChatIdRef.current = chatId;
+
     const loadHistoryAndSubscribe = async () => {
+      if (isLoadingRef.current) return;
+      isLoadingRef.current = true;
+      setLoading(true);
+
       try {
         console.log('[HISTORY] Loading chat history for room:', chatId);
 
@@ -162,9 +180,12 @@ const Chat = () => {
         scrollToBottom('auto');
 
         // STEP 2: Mark all messages as read in backend
-        await api.put(`/messages/chatroom/${chatId}/read-all`);
+        await markMessagesAsRead(chatId);
 
-        // STEP 3: Send delivery ACK ONLY for OTHER people's messages
+        // ✅ STEP 3: REFRESH SIDEBAR to update unread counts
+        await fetchRooms();
+
+        // STEP 4: Send delivery ACK ONLY for OTHER people's messages
         if (data && data.length > 0 && sendDeliveryAck) {
           const otherMessages = data.filter(m => m.senderId !== user?.id);
           if (otherMessages.length > 0) {
@@ -175,7 +196,7 @@ const Chat = () => {
           }
         }
 
-        // STEP 4: Send seen ACK if chat is active
+        // STEP 5: Send seen ACK if chat is active
         if (data && data.length > 0 && sendSeenAck && isChatActiveRef.current) {
           const otherMessages = data.filter(m => m.senderId !== user?.id);
           if (otherMessages.length > 0) {
@@ -186,11 +207,16 @@ const Chat = () => {
           }
         }
 
-        // STEP 5: Subscribe to new messages
+        // STEP 6: Subscribe to new messages
         subscriptionRef.current?.unsubscribe();
         subscriptionRef.current = subscribeToRoom(chatId, (message) => {
-
-          setMessages(prev => [...prev, message]);
+          setMessages(prev => {
+            // Avoid duplicates
+            if (prev.some((m) => m.id === message.id)) {
+              return prev;
+            }
+            return [...prev, message];
+          });
           scrollToBottom();
 
           // Auto-send delivery ACK for incoming messages
@@ -204,59 +230,34 @@ const Chat = () => {
           }
         });
 
-        // STEP 6: Subscribe to delivery status updates
+        // STEP 7: Subscribe to delivery status updates
         deliverySubRef.current?.unsubscribe();
         if (subscribeToDelivery) {
           deliverySubRef.current = subscribeToDelivery(chatId, (update) => {
-            console.log('[DELIVERY UPDATE] Will update messages ≤', update.lastDeliveredMessageId);
-
             setMessages(prev => {
               const updated = prev.map(msg => {
                 const shouldUpdate = msg.senderId === user?.id &&
                   msg.id <= update.lastDeliveredMessageId &&
                   msg.status === 'SENT';
-
-                if (shouldUpdate) {
-                  console.log('[DELIVERY UPDATE] Updating message', msg.id, 'from SENT to DELIVERED');
-                }
-
                 return shouldUpdate ? { ...msg, status: 'DELIVERED' } : msg;
               });
-
-              console.log('[DELIVERY UPDATE] Updated message statuses:',
-                updated.filter(m => m.senderId === user?.id).map(m => ({ id: m.id, status: m.status }))
-              );
-
               return updated;
             });
           });
         }
 
-        // STEP 7: Subscribe to seen status updates
+        // STEP 8: Subscribe to seen status updates
         seenSubRef.current?.unsubscribe();
         if (subscribeToSeen) {
           console.log('[SUBSCRIBE] Subscribing to seen updates for room:', chatId);
           seenSubRef.current = subscribeToSeen(chatId, (update) => {
-            console.log('[SEEN UPDATE] Received:', update);
-            console.log('[SEEN UPDATE] Will update messages ≤', update.lastSeenMessageId);
-
             setMessages(prev => {
               const updated = prev.map(msg => {
                 const shouldUpdate = msg.senderId === user?.id &&
                   msg.id <= update.lastSeenMessageId &&
                   (msg.status === 'SENT' || msg.status === 'DELIVERED');
-
-                if (shouldUpdate) {
-                  console.log('[SEEN UPDATE] Updating message', msg.id, 'from', msg.status, 'to SEEN');
-                }
-
                 return shouldUpdate ? { ...msg, status: 'SEEN' } : msg;
               });
-
-              console.log('[SEEN UPDATE] Updated message statuses:',
-                updated.filter(m => m.senderId === user?.id).map(m => ({ id: m.id, status: m.status }))
-              );
-
               return updated;
             });
           });
@@ -266,7 +267,11 @@ const Chat = () => {
 
       } catch (err) {
         console.error("[ERROR] Failed to load chat history or subscribe", err);
+        toast.error('Failed to load chat history');
         setMessages([]);
+      } finally {
+        setLoading(false);
+        isLoadingRef.current = false;
       }
     };
 
@@ -277,13 +282,15 @@ const Chat = () => {
       subscriptionRef.current?.unsubscribe();
       deliverySubRef.current?.unsubscribe();
       seenSubRef.current?.unsubscribe();
+      isLoadingRef.current = false;
     };
-  }, [chatId, isConnected, subscribeToRoom, subscribeToDelivery, subscribeToSeen, sendDeliveryAck, sendSeenAck, scrollToBottom, user?.id]);
+  }, [chatId, isConnected, subscribeToRoom, subscribeToDelivery, subscribeToSeen,
+      sendDeliveryAck, sendSeenAck, scrollToBottom, user?.id, fetchRooms]);
 
+  // ✅ Handle send message
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (!newMessage.trim() || !isConnected) return;
-
     console.log('[SEND] Sending message:', newMessage.trim());
     sendMessage(chatId, newMessage.trim());
     setNewMessage("");
@@ -291,8 +298,21 @@ const Chat = () => {
 
   const groupedMessages = groupMessagesByDate(messages);
 
+  // ✅ Loading state
+  if (loading && chatId) {
+    return (
+      <div className="flex h-screen bg-[#0a0a0a]">
+        <ChatSidebar rooms={rooms} setRooms={setRooms} onNewChat={() => setShowNewChatModal(true)} />
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-[#c9a961] text-lg font-medium">Loading messages...</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen bg-[#0a0a0a]">
+      {/* ✅ Sidebar with rooms state */}
       <ChatSidebar rooms={rooms} setRooms={setRooms} onNewChat={() => setShowNewChatModal(true)} />
 
       <div className="flex-1 flex flex-col">

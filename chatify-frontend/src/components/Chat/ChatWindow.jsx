@@ -43,29 +43,28 @@ const ChatWindow = ({ chatRoomId, onChatUpdated }) => {
     }
   }, [chatRoomId]);
 
-  const loadMessages = useCallback(async () => {
-    if (!chatRoomId || isLoadingRef.current) return;
-    
-    try {
-      isLoadingRef.current = true;
-      setLoading(true);
-      const data = await getMessages(chatRoomId);
-      
-      // Track loaded message IDs to prevent duplicates
-      loadedMessagesRef.current = new Set(data.map(m => m.id));
-      setMessages(data);
-      
-      // Mark all messages as read when opening the chat
-      await markAllMessagesAsRead(chatRoomId);
-      if (onChatUpdated) onChatUpdated();
-    } catch (error) {
-      console.error('Failed to load messages:', error);
-      toast.error('Failed to load messages');
-    } finally {
-      setLoading(false);
-      isLoadingRef.current = false;
-    }
-  }, [chatRoomId, onChatUpdated]);
+ const loadMessages = useCallback(async () => {
+     if (!chatRoomId || isLoadingRef.current) return;
+     try {
+         isLoadingRef.current = true;
+         setLoading(true);
+         const data = await getMessages(chatRoomId);
+
+         loadedMessagesRef.current = new Set(data.map(m => m.id));
+         setMessages(data);
+
+         // Mark all messages as read when opening the chat
+         await markAllMessagesAsRead(chatRoomId);
+
+         if (onChatUpdated) onChatUpdated();
+     } catch (error) {
+         console.error('Failed to load messages:', error);
+         toast.error('Failed to load messages');
+     } finally {
+         setLoading(false);
+         isLoadingRef.current = false;
+     }
+ }, [chatRoomId, onChatUpdated]);
 
   const handleNewMessage = useCallback((message) => {
     if (!message || !message.id) return;
@@ -116,25 +115,14 @@ const ChatWindow = ({ chatRoomId, onChatUpdated }) => {
     if (onChatUpdated) onChatUpdated();
   }, [scrollToBottom, onChatUpdated]);
 
-  // Reset state when chatRoomId changes
-  useEffect(() => {
-    if (chatRoomId !== previousChatRoomIdRef.current) {
-      // Clear state for the new chat room
-      setMessages([]);
-      setChatRoom(null);
-      setIsSubscribed(false);
-      loadedMessagesRef.current = new Set();
-      previousChatRoomIdRef.current = chatRoomId;
-    }
-  }, [chatRoomId]);
-
   // Load chat room and messages when chatRoomId changes
-  useEffect(() => {
-    if (chatRoomId) {
-      loadChatRoom();
-      loadMessages();
+
+    useEffect(() => {
+        if (chatRoomId) {
+            loadChatRoom();
+            loadMessages();
     }
-  }, [chatRoomId, loadChatRoom, loadMessages]);
+}, [chatRoomId, loadChatRoom, loadMessages]);
 
   // Subscribe to WebSocket after messages are loaded to prevent race conditions
   useEffect(() => {

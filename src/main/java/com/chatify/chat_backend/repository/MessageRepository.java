@@ -55,6 +55,26 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
 
   Optional<Message> findTopByChatRoomOrderByTimestampDesc(ChatRoom chatRoom);
 
+    @Query("""
+    SELECT COUNT(m) FROM Message m 
+    WHERE m.chatRoom.id = :chatRoomId 
+    AND m.sender.id != :userId 
+    AND m.id > :lastReadMessageId
+    """)
+    Long countUnreadMessagesByUserChatState(
+            @Param("chatRoomId") Long chatRoomId,
+            @Param("userId") Long userId,
+            @Param("lastReadMessageId") Long lastReadMessageId
+    );
+
+    long countByChatRoomIdAndSenderIdNot(
+            @Param("chatRoomId") Long chatRoomId,
+            @Param("senderId") Long senderId
+    );
+
+
+
+
     long countByChatRoomIdAndIdGreaterThanAndSenderIdNot(
             Long chatRoomId,
             Long lastReadMessageId,

@@ -135,5 +135,5 @@ export const createChatRoom = (name, isGroup, participantIds) =>
 
 export const sendMessageAPI = (messageData) => api.post('/messages', messageData);
 export const getAllUsers = () => api.get('/users');
-
+export const markMessagesAsRead = (chatId) => api.put(`/messages/chatroom/${chatId}/read-all`);
 export default api;

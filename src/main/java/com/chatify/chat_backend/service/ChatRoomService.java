@@ -13,6 +13,7 @@ import com.chatify.chat_backend.exception.UnauthorizedException;
 import com.chatify.chat_backend.repository.ChatRoomRepository;
 import com.chatify.chat_backend.repository.MessageRepository;
 import com.chatify.chat_backend.repository.UserChatStateRepository;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,22 +27,24 @@ import java.util.stream.Collectors;
 
 @Service
 public class ChatRoomService {
-
     private final ChatRoomRepository chatRoomRepository;
     private final MessageRepository messageRepository;
     private final UserService userService;
     private final UserChatStateRepository userChatStateRepository;
+    @Lazy
+    private final MessageService messageService;
 
     public ChatRoomService(ChatRoomRepository chatRoomRepository,
                            MessageRepository messageRepository,
                            UserService userService,
-                           UserChatStateRepository userChatStateRepository) {
+                           UserChatStateRepository userChatStateRepository,
+                           @Lazy MessageService messageService) {
         this.chatRoomRepository = chatRoomRepository;
         this.messageRepository = messageRepository;
         this.userService = userService;
         this.userChatStateRepository = userChatStateRepository;
+        this.messageService = messageService;
     }
-
 
     @Transactional
     public ChatRoomDTO addParticipant(Long chatRoomId, Long userId, Long requesterId) {
@@ -190,7 +193,29 @@ public class ChatRoomService {
             state.setLastReadMessage(lastMessage);
             state.setLastReadAt(Instant.now());
             userChatStateRepository.save(state);
+
+            // ✅ ALSO update Message.readBy for read receipt UI
+            messageService.markAllMessagesAsRead(chatRoomId, user.getId());
         }
+    }
+
+    // ✅ NEW METHOD - Calculate unread count using UserChatState (cursor-based)
+    private Long calculateUnreadCount(Long chatRoomId, Long userId) {
+        Optional<UserChatState> stateOpt = userChatStateRepository
+                .findByUserIdAndChatRoomId(userId, chatRoomId);
+
+        if (stateOpt.isEmpty() || stateOpt.get().getLastReadMessage() == null) {
+            // User has never read any message in this chat
+            // Count ALL messages from other users
+            return messageRepository.countByChatRoomIdAndSenderIdNot(chatRoomId, userId);
+        }
+
+        Long lastReadMessageId = stateOpt.get().getLastReadMessage().getId();
+
+        // Count messages AFTER last read message (from other users)
+        return messageRepository.countByChatRoomIdAndIdGreaterThanAndSenderIdNot(
+                chatRoomId, lastReadMessageId, userId
+        );
     }
 
     private ChatRoomDTO mapToDTO(ChatRoom chatRoom, User currentUser) {
@@ -200,7 +225,8 @@ public class ChatRoomService {
 
         UserDTO adminDTO = chatRoom.getAdmin() != null ? userService.mapToDTO(chatRoom.getAdmin()) : null;
 
-        Long unreadCount = messageRepository.countUnreadMessagesByChatRoomAndUser(chatRoom, currentUser);
+        // ✅ CHANGED - Use cursor-based count instead of Message.readBy
+        Long unreadCount = calculateUnreadCount(chatRoom.getId(), currentUser.getId());
 
         Optional<Message> lastMessageOpt = messageRepository.findTopByChatRoomOrderByTimestampDesc(chatRoom);
 

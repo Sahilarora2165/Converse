@@ -1,10 +1,10 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useImperativeHandle, forwardRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getChatRooms } from "../services/api";
 import useAuth from '../hooks/useAuth';
 import useWebSocket from '../hooks/useWebSocket';
 
-const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
+const ChatSidebar = forwardRef(({ rooms, setRooms, onNewChat }, ref) => {
   const navigate = useNavigate();
   const { chatId } = useParams();
   const { user: currentUser, logout } = useAuth();
@@ -12,25 +12,31 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
 
   const [activeTab, setActiveTab] = useState('all');
 
-  // Initial rooms fetch + sort after load
-  useEffect(() => {
-    const fetchRooms = async () => {
-      try {
-        const { data } = await getChatRooms();
-        const sorted = [...data].sort((a, b) => {
-          const timeA = a.lastMessageTimestamp || a.createdAt;
-          const timeB = b.lastMessageTimestamp || b.createdAt;
-          return new Date(timeB) - new Date(timeA);
-        });
-        setRooms(sorted);
-      } catch (err) {
-        console.error("Failed to load chat rooms", err);
-      }
-    };
-    fetchRooms();
+  // ✅ EXPOSE refresh function to parent component
+  useImperativeHandle(ref, () => ({
+    refreshRooms: fetchRooms
+  }));
+
+  // ✅ Initial rooms fetch + sort after load
+  const fetchRooms = useCallback(async () => {
+    try {
+      const { data } = await getChatRooms();
+      const sorted = [...data].sort((a, b) => {
+        const timeA = a.lastMessageTimestamp || a.createdAt;
+        const timeB = b.lastMessageTimestamp || b.createdAt;
+        return new Date(timeB) - new Date(timeA);
+      });
+      setRooms(sorted);
+    } catch (err) {
+      console.error("Failed to load chat rooms", err);
+    }
   }, [setRooms]);
 
-  // Per-room presence subscriptions
+  useEffect(() => {
+    fetchRooms();
+  }, [fetchRooms]);
+
+  // ✅ Per-room presence subscriptions
   useEffect(() => {
     if (!isConnected || rooms.length === 0 || !subscribeToPresence) return;
 
@@ -55,7 +61,7 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
     };
   }, [isConnected, rooms, subscribeToPresence, setRooms]);
 
-  // Reset unread count on chat select
+  // ✅ Reset unread count on chat select (optimistic UI)
   useEffect(() => {
     if (!chatId) return;
     setRooms(prev => prev.map(r =>
@@ -63,43 +69,67 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
     ));
   }, [chatId, setRooms]);
 
-  // Message subscriptions + bump on new message
-  useEffect(() => {
-    if (!isConnected || !subscribeToRoom || rooms.length === 0) return;
 
-    const subscriptions = [];
+ useEffect(() => {
+   if (!isConnected || !subscribeToRoom || rooms.length === 0) return;
 
-    rooms.forEach(room => {
-      const sub = subscribeToRoom(room.id, (message) => {
-        setRooms(prev => {
-          const updated = prev.map(r => {
-            if (r.id === room.id) {
-              return {
-                ...r,
-                lastMessage: message.content,
-                lastMessageTimestamp: message.timestamp,
-                lastMessageSenderId: message.senderId,
-                lastMessageSenderName: message.senderName || 'Unknown',
-                unreadCount: String(chatId) === String(room.id) ? 0 : (r.unreadCount || 0) + 1
-              };
-            }
-            return r;
-          });
+   const subscriptions = [];
 
-          return [...updated].sort((a, b) => {
-            const timeA = a.lastMessageTimestamp || a.createdAt;
-            const timeB = b.lastMessageTimestamp || b.createdAt;
-            return new Date(timeB) - new Date(timeA);
-          });
-        });
-      });
-      subscriptions.push(sub);
-    });
+   rooms.forEach(room => {
+     const sub = subscribeToRoom(room.id, (message) => {
+       // ✅ Don't increment if message is from current user
+       const isFromCurrentUser = String(message.senderId) === String(currentUser?.id);
 
-    return () => subscriptions.forEach(sub => sub?.unsubscribe());
-  }, [isConnected, rooms.length, subscribeToRoom, chatId, setRooms]);
+       // ✅ CRITICAL: Don't update if this is the currently active chat
+       const isActiveChat = String(chatId) === String(room.id);
 
-  // Derived sorted + filtered rooms
+       setRooms(prev => {
+         const updated = prev.map(r => {
+           if (String(r.id) === String(room.id)) {
+             return {
+               ...r,
+               lastMessage: message.content,
+               lastMessageTimestamp: message.timestamp,
+               lastMessageSenderId: message.senderId,
+               lastMessageSenderName: message.senderName || 'Unknown',
+               // ✅ Only increment unread if NOT current chat AND not from current user
+               unreadCount: (isActiveChat || isFromCurrentUser)
+                 ? 0
+                 : (r.unreadCount || 0) + 1
+             };
+           }
+           return r;
+         });
+
+         return [...updated].sort((a, b) => {
+           const timeA = a.lastMessageTimestamp || a.createdAt;
+           const timeB = b.lastMessageTimestamp || b.createdAt;
+           return new Date(timeB) - new Date(timeA);
+         });
+       });
+     });
+     subscriptions.push(sub);
+   });
+
+   return () => {
+     // ✅ Proper cleanup - unsubscribe ALL subscriptions
+     subscriptions.forEach(sub => sub?.unsubscribe());
+   };
+ }, [isConnected, rooms.length, subscribeToRoom, chatId, currentUser?.id, setRooms]);
+
+// ✅ Sync unread count after API refresh (NEW - prevents WebSocket overwrite)
+useEffect(() => {
+  if (!rooms.length || !chatId) return;
+
+  // Force sync current chat to 0 unread (matches backend state)
+  setRooms(prev => prev.map(r =>
+    String(r.id) === String(chatId)
+      ? { ...r, unreadCount: 0 }
+      : r
+  ));
+}, [chatId, rooms.length, setRooms]);
+
+  // ✅ Derived sorted + filtered rooms
   const sortedFilteredRooms = useMemo(() => {
     let filtered = rooms.filter(room => {
       if (activeTab === 'group') return room.isGroupChat;
@@ -255,6 +285,6 @@ const ChatSidebar = ({ rooms, setRooms, onNewChat }) => {
       </div>
     </div>
   );
-};
+});
 
 export default ChatSidebar;

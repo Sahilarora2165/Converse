@@ -3,10 +3,12 @@ import { useParams, useNavigate } from "react-router-dom";
 import useAuth from "../hooks/useAuth";
 import useWebSocket from "../hooks/useWebSocket";
 import { getChatRooms, getChatHistory, markMessagesAsRead } from "../services/api";
-import api from "../services/api";
+import { getPresignedUrl, uploadFileToS3, sendMessage as sendMessageREST } from "../api/messages";
 import NewChatModal from "../components/NewChatModal";
 import ChatSidebar from "../components/ChatSidebar";
 import MessageItem from "../components/Chat/MessageItem";
+import FileUpload from "../components/Chat/FileUpload";
+import { ALLOWED_FILE_TYPES, MESSAGE_TYPES } from "../utils/constants";
 import toast from 'react-hot-toast';
 
 const Chat = () => {
@@ -30,6 +32,11 @@ const Chat = () => {
   const [showNewChatModal, setShowNewChatModal] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  // file upload state
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [sending, setSending] = useState(false);
+
   const messagesEndRef = useRef(null);
   const subscriptionRef = useRef(null);
   const deliverySubRef = useRef(null);
@@ -44,7 +51,6 @@ const Chat = () => {
     : null;
   const isOtherUserOnline = otherUser?.status === 'ONLINE';
 
-  // ✅ EXPOSED FUNCTION - Refresh rooms from API (called after marking messages as read)
   const fetchRooms = useCallback(async () => {
     try {
       const { data } = await getChatRooms();
@@ -59,12 +65,10 @@ const Chat = () => {
     }
   }, []);
 
-  // ✅ Initial rooms fetch
   useEffect(() => {
     fetchRooms();
   }, [fetchRooms]);
 
-  // ✅ Format relative time for last seen
   const formatRelativeTime = (dateString) => {
     if (!dateString) return 'Offline';
     const date = new Date(dateString);
@@ -79,7 +83,6 @@ const Chat = () => {
     return `${diffDays} ${diffDays === 1 ? 'day' : 'days'} ago`;
   };
 
-  // ✅ Format date separator
   const formatDateSeparator = (dateString) => {
     const msgDate = new Date(dateString);
     const today = new Date();
@@ -89,27 +92,18 @@ const Chat = () => {
     const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const yesterdayOnly = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
 
-    if (msgDateOnly.getTime() === todayOnly.getTime()) {
-      return 'Today';
-    } else if (msgDateOnly.getTime() === yesterdayOnly.getTime()) {
-      return 'Yesterday';
-    } else {
-      return msgDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-    }
+    if (msgDateOnly.getTime() === todayOnly.getTime()) return 'Today';
+    if (msgDateOnly.getTime() === yesterdayOnly.getTime()) return 'Yesterday';
+    return msgDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   };
 
-  // ✅ Group messages by date
   const groupMessagesByDate = (messages) => {
     const grouped = [];
     let lastDate = null;
     messages.forEach((msg) => {
       const msgDate = new Date(msg.timestamp).toDateString();
       if (msgDate !== lastDate) {
-        grouped.push({
-          type: 'date-separator',
-          date: msg.timestamp,
-          id: `date-${msgDate}`
-        });
+        grouped.push({ type: 'date-separator', date: msg.timestamp, id: `date-${msgDate}` });
         lastDate = msgDate;
       }
       grouped.push({ type: 'message', ...msg });
@@ -117,25 +111,58 @@ const Chat = () => {
     return grouped;
   };
 
-  // ✅ Scroll to bottom
   const scrollToBottom = useCallback((behavior = "smooth") => {
     messagesEndRef.current?.scrollIntoView({ behavior });
   }, []);
 
-  // ✅ Track chat focus for seen status
+  // determine message type from file content type
+  const getMessageType = (contentType) => {
+    if (contentType?.startsWith('image/')) return MESSAGE_TYPES.IMAGE;
+    if (contentType?.startsWith('video/')) return MESSAGE_TYPES.VIDEO;
+    return MESSAGE_TYPES.FILE;
+  };
+
+  // file selection handler
+  const handleFileSelect = (file) => {
+    if (!file) return;
+
+    const typeConfig = ALLOWED_FILE_TYPES[file.type];
+    if (!typeConfig) {
+      toast.error('File type not allowed');
+      return;
+    }
+
+    if (file.size > typeConfig.maxMB * 1024 * 1024) {
+      toast.error(`Max size for this type is ${typeConfig.maxMB}MB`);
+      return;
+    }
+
+    setSelectedFile(file);
+
+    if (file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onloadend = () => setPreviewUrl(reader.result);
+      reader.readAsDataURL(file);
+    } else {
+      setPreviewUrl(null);
+    }
+  };
+
+  const handleRemoveFile = () => {
+    setSelectedFile(null);
+    setPreviewUrl(null);
+  };
+
+  // focus/blur for seen status
   useEffect(() => {
     const handleFocus = () => {
       isChatActiveRef.current = true;
       if (chatId && messages.length > 0 && sendSeenAck) {
         const lastMessageId = messages[messages.length - 1]?.id;
-        if (lastMessageId) {
-          sendSeenAck(parseInt(chatId), lastMessageId);
-        }
+        if (lastMessageId) sendSeenAck(parseInt(chatId), lastMessageId);
       }
     };
-    const handleBlur = () => {
-      isChatActiveRef.current = false;
-    };
+    const handleBlur = () => { isChatActiveRef.current = false; };
 
     window.addEventListener('focus', handleFocus);
     window.addEventListener('blur', handleBlur);
@@ -147,9 +174,8 @@ const Chat = () => {
     };
   }, [chatId, messages, sendSeenAck]);
 
-  // ✅ Load history + subscribe to updates + Mark as read + Refresh sidebar
+  // load history + subscribe
   useEffect(() => {
-    // CRITICAL: Don't proceed if WebSocket is not connected
     if (!chatId || !isConnected) {
       if (!chatId) {
         setMessages([]);
@@ -160,10 +186,7 @@ const Chat = () => {
       return;
     }
 
-    // ✅ Prevent duplicate loads for same chatId
-    if (previousChatIdRef.current === chatId && !isLoadingRef.current) {
-      return;
-    }
+    if (previousChatIdRef.current === chatId && !isLoadingRef.current) return;
     previousChatIdRef.current = chatId;
 
     const loadHistoryAndSubscribe = async () => {
@@ -172,101 +195,70 @@ const Chat = () => {
       setLoading(true);
 
       try {
-        console.log('[HISTORY] Loading chat history for room:', chatId);
-
-        // STEP 1: Load message history
         const { data } = await getChatHistory(chatId);
         setMessages(data || []);
         scrollToBottom('auto');
 
-        // STEP 2: Mark all messages as read in backend
         await markMessagesAsRead(chatId);
-
-        // ✅ STEP 3: REFRESH SIDEBAR to update unread counts
         await fetchRooms();
 
-        // STEP 4: Send delivery ACK ONLY for OTHER people's messages
         if (data && data.length > 0 && sendDeliveryAck) {
           const otherMessages = data.filter(m => m.senderId !== user?.id);
           if (otherMessages.length > 0) {
             const lastOtherId = otherMessages[otherMessages.length - 1]?.id;
-            if (lastOtherId) {
-              sendDeliveryAck(parseInt(chatId), lastOtherId);
-            }
+            if (lastOtherId) sendDeliveryAck(parseInt(chatId), lastOtherId);
           }
         }
 
-        // STEP 5: Send seen ACK if chat is active
         if (data && data.length > 0 && sendSeenAck && isChatActiveRef.current) {
           const otherMessages = data.filter(m => m.senderId !== user?.id);
           if (otherMessages.length > 0) {
             const lastOtherId = otherMessages[otherMessages.length - 1]?.id;
-            if (lastOtherId) {
-              sendSeenAck(parseInt(chatId), lastOtherId);
-            }
+            if (lastOtherId) sendSeenAck(parseInt(chatId), lastOtherId);
           }
         }
 
-        // STEP 6: Subscribe to new messages
         subscriptionRef.current?.unsubscribe();
         subscriptionRef.current = subscribeToRoom(chatId, (message) => {
           setMessages(prev => {
-            // Avoid duplicates
-            if (prev.some((m) => m.id === message.id)) {
-              return prev;
-            }
+            if (prev.some((m) => m.id === message.id)) return prev;
             return [...prev, message];
           });
           scrollToBottom();
 
-          // Auto-send delivery ACK for incoming messages
           if (sendDeliveryAck && message.senderId !== user?.id) {
             sendDeliveryAck(parseInt(chatId), message.id);
           }
-
-          // Auto-send seen ACK if chat is active
           if (sendSeenAck && message.senderId !== user?.id && isChatActiveRef.current) {
             sendSeenAck(parseInt(chatId), message.id);
           }
         });
 
-        // STEP 7: Subscribe to delivery status updates
         deliverySubRef.current?.unsubscribe();
         if (subscribeToDelivery) {
           deliverySubRef.current = subscribeToDelivery(chatId, (update) => {
-            setMessages(prev => {
-              const updated = prev.map(msg => {
-                const shouldUpdate = msg.senderId === user?.id &&
-                  msg.id <= update.lastDeliveredMessageId &&
-                  msg.status === 'SENT';
-                return shouldUpdate ? { ...msg, status: 'DELIVERED' } : msg;
-              });
-              return updated;
-            });
+            setMessages(prev => prev.map(msg => {
+              const shouldUpdate = msg.senderId === user?.id &&
+                msg.id <= update.lastDeliveredMessageId && msg.status === 'SENT';
+              return shouldUpdate ? { ...msg, status: 'DELIVERED' } : msg;
+            }));
           });
         }
 
-        // STEP 8: Subscribe to seen status updates
         seenSubRef.current?.unsubscribe();
         if (subscribeToSeen) {
-          console.log('[SUBSCRIBE] Subscribing to seen updates for room:', chatId);
           seenSubRef.current = subscribeToSeen(chatId, (update) => {
-            setMessages(prev => {
-              const updated = prev.map(msg => {
-                const shouldUpdate = msg.senderId === user?.id &&
-                  msg.id <= update.lastSeenMessageId &&
-                  (msg.status === 'SENT' || msg.status === 'DELIVERED');
-                return shouldUpdate ? { ...msg, status: 'SEEN' } : msg;
-              });
-              return updated;
-            });
+            setMessages(prev => prev.map(msg => {
+              const shouldUpdate = msg.senderId === user?.id &&
+                msg.id <= update.lastSeenMessageId &&
+                (msg.status === 'SENT' || msg.status === 'DELIVERED');
+              return shouldUpdate ? { ...msg, status: 'SEEN' } : msg;
+            }));
           });
         }
 
-        console.log('[INIT] All subscriptions complete for room:', chatId);
-
       } catch (err) {
-        console.error("[ERROR] Failed to load chat history or subscribe", err);
+        console.error("[ERROR] Failed to load chat history", err);
         toast.error('Failed to load chat history');
         setMessages([]);
       } finally {
@@ -278,7 +270,6 @@ const Chat = () => {
     loadHistoryAndSubscribe();
 
     return () => {
-      console.log('[CLEANUP] Unsubscribing from room:', chatId);
       subscriptionRef.current?.unsubscribe();
       deliverySubRef.current?.unsubscribe();
       seenSubRef.current?.unsubscribe();
@@ -287,18 +278,52 @@ const Chat = () => {
   }, [chatId, isConnected, subscribeToRoom, subscribeToDelivery, subscribeToSeen,
       sendDeliveryAck, sendSeenAck, scrollToBottom, user?.id, fetchRooms]);
 
-  // ✅ Handle send message
-  const handleSendMessage = (e) => {
+  // send message — handles both text-only and file messages
+  const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!newMessage.trim() || !isConnected) return;
-    console.log('[SEND] Sending message:', newMessage.trim());
-    sendMessage(chatId, newMessage.trim());
-    setNewMessage("");
+    if ((!newMessage.trim() && !selectedFile) || !isConnected) return;
+    if (sending) return;
+
+    setSending(true);
+
+    try {
+      if (selectedFile) {
+        // file message — go through REST (presigned URL → S3 → save message)
+        const presignedData = await getPresignedUrl(
+          selectedFile.name,
+          selectedFile.type,
+          selectedFile.size
+        );
+
+        await uploadFileToS3(presignedData.presignedUrl, selectedFile);
+
+        // save message via REST — backend will also broadcast via WebSocket
+        await sendMessageREST({
+          chatRoomId: parseInt(chatId),
+          content: newMessage || '',
+          messageType: getMessageType(selectedFile.type),
+          fileUrl: presignedData.fileUrl,
+          fileName: selectedFile.name,
+        });
+
+        setSelectedFile(null);
+        setPreviewUrl(null);
+      } else {
+        // text-only — send via WebSocket as before
+        sendMessage(chatId, newMessage.trim());
+      }
+
+      setNewMessage("");
+    } catch (err) {
+      console.error('Failed to send message:', err);
+      toast.error(err.response?.data?.message || 'Failed to send message');
+    } finally {
+      setSending(false);
+    }
   };
 
   const groupedMessages = groupMessagesByDate(messages);
 
-  // ✅ Loading state
   if (loading && chatId) {
     return (
       <div className="flex h-screen bg-[#0a0a0a]">
@@ -312,7 +337,6 @@ const Chat = () => {
 
   return (
     <div className="flex h-screen bg-[#0a0a0a]">
-      {/* ✅ Sidebar with rooms state */}
       <ChatSidebar rooms={rooms} setRooms={setRooms} onNewChat={() => setShowNewChatModal(true)} />
 
       <div className="flex-1 flex flex-col">
@@ -324,7 +348,6 @@ const Chat = () => {
                 <h2 className="text-xl font-semibold text-[#e8e8e8] tracking-wide">
                   {currentRoom.isGroupChat ? currentRoom.name : otherUser?.username || 'Unknown'}
                 </h2>
-
                 {!currentRoom.isGroupChat && otherUser && (
                   <div className="flex items-center gap-2 text-xs">
                     <span className={`w-2 h-2 rounded-full ${isOtherUserOnline ? "bg-[#c9a961] shadow-[0_0_8px_rgba(201,169,97,0.6)]" : "bg-[#4a4a4a]"}`} />
@@ -350,36 +373,55 @@ const Chat = () => {
                     </div>
                   );
                 }
-
                 const isMe = String(item.senderId) === String(user?.id);
                 return (
-                  <MessageItem
-                    key={item.id}
-                    message={item}
-                    isMe={isMe}
-                    currentUserId={user?.id}
-                  />
+                  <MessageItem key={item.id} message={item} isMe={isMe} currentUserId={user?.id} />
                 );
               })}
               <div ref={messagesEndRef} />
             </div>
 
+            {/* FILE PREVIEW BAR */}
+            {selectedFile && (
+              <div className="px-6 py-3 bg-[#1a1a1a] border-t border-[#2a2a2a] flex items-center gap-3">
+                {previewUrl ? (
+                  <img src={previewUrl} alt="Preview" className="h-14 w-14 object-cover rounded-lg border border-[#3a3a3a]" />
+                ) : (
+                  <div className="h-14 w-14 bg-[#2a2a2a] rounded-lg flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-[#6a6a6a]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-[#e8e8e8] truncate">{selectedFile.name}</p>
+                  <p className="text-xs text-[#6a6a6a]">{(selectedFile.size / 1024).toFixed(1)} KB</p>
+                </div>
+                <button type="button" onClick={handleRemoveFile} className="p-1.5 text-[#6a6a6a] hover:text-red-400 transition-colors">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            )}
+
             {/* INPUT */}
             <form onSubmit={handleSendMessage} className="p-6 bg-gradient-to-r from-[#1a1a1a] to-[#141414] border-t border-[#2a2a2a] shadow-[0_-4px_20px_rgba(0,0,0,0.5)]">
-              <div className="flex gap-3">
+              <div className="flex items-center gap-3">
+                <FileUpload onFileSelect={handleFileSelect} disabled={sending || !isConnected} />
                 <input
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
-                  disabled={!isConnected}
-                  placeholder="Type a message…"
+                  disabled={!isConnected || sending}
+                  placeholder={selectedFile ? "Add a caption (optional)…" : "Type a message…"}
                   className="flex-1 bg-[#0f0f0f] border border-[#2a2a2a] rounded-xl px-5 py-3.5 text-[#e8e8e8] placeholder-[#5a5a5a] focus:outline-none focus:border-[#c9a961] focus:shadow-[0_0_0_3px_rgba(201,169,97,0.1)] transition-all"
                 />
                 <button
                   type="submit"
-                  disabled={!newMessage.trim() || !isConnected}
+                  disabled={(!newMessage.trim() && !selectedFile) || !isConnected || sending}
                   className="px-6 py-3.5 rounded-xl bg-gradient-to-br from-[#c9a961] via-[#b8955a] to-[#a8865a] text-[#0a0a0a] font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:shadow-[0_4px_20px_rgba(201,169,97,0.4)] active:scale-95 transition-all"
                 >
-                  Send
+                  {sending ? '...' : 'Send'}
                 </button>
               </div>
             </form>

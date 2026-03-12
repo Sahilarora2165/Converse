@@ -37,7 +37,6 @@ public class FileStorageService {
 
     private S3Presigner presigner;
 
-    // file type → max size in bytes
     private static final Map<String, Long> ALLOWED_TYPES = Map.of(
             "image/jpeg",       5L  * 1024 * 1024,
             "image/png",        5L  * 1024 * 1024,
@@ -50,7 +49,6 @@ public class FileStorageService {
             "video/x-msvideo",  50L * 1024 * 1024
     );
 
-    // content type → valid extensions
     private static final Map<String, String[]> TYPE_TO_EXTENSIONS = Map.of(
             "image/jpeg",       new String[]{".jpg", ".jpeg"},
             "image/png",        new String[]{".png"},
@@ -65,7 +63,6 @@ public class FileStorageService {
 
     @PostConstruct
     public void init() {
-        // build the presigner once at startup — reuse for every request
         AwsBasicCredentials credentials = AwsBasicCredentials.create(accessKey, secretKey);
         this.presigner = S3Presigner.builder()
                 .region(Region.of(region))
@@ -73,20 +70,13 @@ public class FileStorageService {
                 .build();
     }
 
-    /**
-     * Validates the file metadata and returns:
-     * - presignedUrl: client PUTs the file directly to S3 using this (expires in 5 min)
-     * - fileUrl: permanent S3 URL stored in the message
-     *
-     * File never touches our server — S3 handles all bandwidth.
-     */
     public FileUploadResponseDTO generatePresignedUrl(String originalFileName, String contentType, long fileSize) {
         validateFileMetadata(originalFileName, contentType, fileSize);
 
         String extension = getExtension(originalFileName);
-        // unique S3 key — prevents overwrite and name collisions
         String s3Key = "uploads/" + UUID.randomUUID() + extension;
 
+        // no ACL needed — bucket policy allows public read on uploads/*
         PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                 .bucket(bucketName)
                 .key(s3Key)
@@ -102,7 +92,6 @@ public class FileStorageService {
         PresignedPutObjectRequest presignedRequest = presigner.presignPutObject(presignRequest);
 
         String presignedUrl = presignedRequest.url().toString();
-        // permanent URL — this is what gets stored in the Message entity
         String fileUrl = "https://" + bucketName + ".s3." + region + ".amazonaws.com/" + s3Key;
 
         return new FileUploadResponseDTO(originalFileName, fileUrl, presignedUrl, contentType, fileSize);

@@ -24,7 +24,9 @@ export const markMessageAsRead = async (messageId) => {
 };
 
 export const markAllMessagesAsRead = async (chatRoomId) => {
-  const response = await axios.put(`/api/messages/chatroom/${chatRoomId}/read-all`);
+  const response = await axios.put(
+    `/api/messages/chatroom/${chatRoomId}/read-all`
+  );
   return response.data;
 };
 
@@ -33,24 +35,19 @@ export const deleteMessage = async (messageId) => {
   return response.data;
 };
 
-// Step 1 of file upload flow:
-// Ask backend for a presigned S3 URL — backend validates type/size, returns presignedUrl + fileUrl
 export const getPresignedUrl = async (fileName, contentType, fileSize) => {
   const response = await axios.post('/api/files/presigned-url', null, {
     params: { fileName, contentType, fileSize },
   });
-  return response.data; // { fileName, fileUrl, presignedUrl, fileType, fileSize }
+  return response.data;
 };
 
-// Step 2 of file upload flow:
-// PUT the actual file directly to S3 using the presigned URL
-// No auth header — this goes directly to S3, not our backend
+// upload directly to S3 — no ACL header needed, bucket policy handles read access
 export const uploadFileToS3 = async (presignedUrl, file) => {
-  await fetch(presignedUrl, {
-    method: 'PUT',
+  const rawAxios = await import('axios');
+  await rawAxios.default.put(presignedUrl, file, {
     headers: {
       'Content-Type': file.type,
     },
-    body: file,
   });
 };

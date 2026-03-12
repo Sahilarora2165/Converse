@@ -9,6 +9,7 @@ import com.chatify.chat_backend.entity.Message;
 import com.chatify.chat_backend.entity.User;
 import com.chatify.chat_backend.entity.UserChatState;
 import com.chatify.chat_backend.entity.enums.MessageStatus;
+import com.chatify.chat_backend.exception.BadRequestException;
 import com.chatify.chat_backend.exception.ResourceNotFoundException;
 import com.chatify.chat_backend.exception.UnauthorizedException;
 import com.chatify.chat_backend.repository.ChatRoomRepository;
@@ -29,36 +30,41 @@ import java.util.stream.Collectors;
 public class MessageService {
 
     private final MessageRepository messageRepository;
-    // ✅ CHANGED - Use repository instead of service (breaks circular dependency)
     private final ChatRoomRepository chatRoomRepository;
     private final UserService userService;
-    // ✅ ADDED - For updating UserChatState
     private final UserChatStateRepository userChatStateRepository;
+    private final ChatRoomService chatRoomService;
 
     public MessageService(MessageRepository messageRepository,
                           ChatRoomRepository chatRoomRepository,
                           UserService userService,
+                          ChatRoomService chatRoomService,
                           UserChatStateRepository userChatStateRepository) {
         this.messageRepository = messageRepository;
         this.chatRoomRepository = chatRoomRepository;
         this.userService = userService;
+        this.chatRoomService = chatRoomService;
         this.userChatStateRepository = userChatStateRepository;
     }
 
     @Transactional
     public MessageDTO sendMessage(SendMessageDTO dto, Long senderId) {
-        User sender = userService.getUserEntityById(senderId);
+        // must have either text content or a file attachment
+        boolean hasContent = dto.getContent() != null && !dto.getContent().isBlank();
+        boolean hasFile = dto.getFileUrl() != null && !dto.getFileUrl().isBlank();
+        if (!hasContent && !hasFile) {
+            throw new BadRequestException("Message must have content or a file attachment");
+        }
 
-        // ✅ FIXED - Use repository instead of chatRoomService
-        ChatRoom chatRoom = chatRoomRepository.findById(dto.getChatRoomId())
-                .orElseThrow(() -> new ResourceNotFoundException("ChatRoom", dto.getChatRoomId()));
+        User sender = userService.getUserEntityById(senderId);
+        ChatRoom chatRoom = chatRoomService.getChatRoomEntity(dto.getChatRoomId());
 
         if (!chatRoom.getParticipants().contains(sender)) {
             throw new UnauthorizedException("User is not a participant of this chat room");
         }
 
         Message message = new Message();
-        message.setContent(dto.getContent());
+        message.setContent(dto.getContent() != null ? dto.getContent() : "");
         message.setMessageType(dto.getMessageType());
         message.setFileUrl(dto.getFileUrl());
         message.setFileName(dto.getFileName());
@@ -66,6 +72,7 @@ public class MessageService {
         message.setChatRoom(chatRoom);
 
         message.setStatus(MessageStatus.SENT);
+
         Message savedMessage = messageRepository.save(message);
         return mapToDTO(savedMessage);
     }

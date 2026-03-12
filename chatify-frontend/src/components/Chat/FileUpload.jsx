@@ -1,6 +1,13 @@
 import { useRef } from 'react';
 
-const FileUpload = ({ onFileSelect }) => {
+const ACCEPTED_TYPES = [
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'video/mp4', 'video/quicktime', 'video/x-msvideo'
+].join(',');
+
+const FileUpload = ({ onFileSelect, disabled }) => {
   const fileInputRef = useRef(null);
 
   const handleClick = () => {
@@ -12,7 +19,7 @@ const FileUpload = ({ onFileSelect }) => {
     if (file) {
       onFileSelect(file);
     }
-    // Reset input so the same file can be selected again
+    // reset so same file can be re-selected
     e.target.value = '';
   };
 
@@ -22,13 +29,14 @@ const FileUpload = ({ onFileSelect }) => {
         ref={fileInputRef}
         type="file"
         onChange={handleFileChange}
-        accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,.doc,.docx,.txt"
+        accept={ACCEPTED_TYPES}
         className="hidden"
       />
       <button
         type="button"
         onClick={handleClick}
-        className="p-2.5 text-gray-500 hover:text-indigo-600 hover:bg-gray-100 rounded-full transition-colors"
+        disabled={disabled}
+        className="p-2.5 text-gray-500 hover:text-indigo-600 hover:bg-gray-100 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         title="Attach file"
       >
         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

@@ -24,9 +24,7 @@ export const markMessageAsRead = async (messageId) => {
 };
 
 export const markAllMessagesAsRead = async (chatRoomId) => {
-  const response = await axios.put(
-    `/api/messages/chatroom/${chatRoomId}/read-all`
-  );
+  const response = await axios.put(`/api/messages/chatroom/${chatRoomId}/read-all`);
   return response.data;
 };
 
@@ -35,28 +33,24 @@ export const deleteMessage = async (messageId) => {
   return response.data;
 };
 
-export const uploadFile = async (file) => {
-  const formData = new FormData();
-  formData.append('file', file);
-
-  const response = await axios.post('/api/messages/upload', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
+// Step 1 of file upload flow:
+// Ask backend for a presigned S3 URL — backend validates type/size, returns presignedUrl + fileUrl
+export const getPresignedUrl = async (fileName, contentType, fileSize) => {
+  const response = await axios.post('/api/files/presigned-url', null, {
+    params: { fileName, contentType, fileSize },
   });
-  return response.data;
+  return response.data; // { fileName, fileUrl, presignedUrl, fileType, fileSize }
 };
 
-export const sendMessageWithFile = async (chatRoomId, content, file) => {
-  const formData = new FormData();
-  formData.append('chatRoomId', chatRoomId);
-  formData.append('content', content);
-  formData.append('file', file);
-
-  const response = await axios.post('/api/messages/with-file', formData, {
+// Step 2 of file upload flow:
+// PUT the actual file directly to S3 using the presigned URL
+// No auth header — this goes directly to S3, not our backend
+export const uploadFileToS3 = async (presignedUrl, file) => {
+  await fetch(presignedUrl, {
+    method: 'PUT',
     headers: {
-      'Content-Type': 'multipart/form-data',
+      'Content-Type': file.type,
     },
+    body: file,
   });
-  return response.data;
 };

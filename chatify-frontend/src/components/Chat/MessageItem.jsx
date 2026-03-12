@@ -1,9 +1,9 @@
 import React from 'react';
 
 const MessageItem = ({ message, isMe, currentUserId }) => {
+
   const renderStatusIcon = () => {
     if (!isMe) return null;
-
     const isSeen = message.status === 'SEEN' || (message.readBy && message.readBy.includes(currentUserId));
 
     if (isSeen) {
@@ -39,10 +39,56 @@ const MessageItem = ({ message, isMe, currentUserId }) => {
     );
   };
 
+  // renders image, video, file, or text based on messageType
+  const renderContent = () => {
+    const { messageType, fileUrl, fileName, content } = message;
+
+    if (messageType === 'IMAGE' && fileUrl) {
+      return (
+        <div className="mb-1">
+          <img
+            src={fileUrl}
+            alt={fileName || 'Image'}
+            className="max-w-[240px] rounded-lg cursor-pointer"
+            onClick={() => window.open(fileUrl, '_blank')}
+          />
+          {content && <p className="mt-1 break-words">{content}</p>}
+        </div>
+      );
+    }
+
+    if (messageType === 'VIDEO' && fileUrl) {
+      return (
+        <div className="mb-1">
+          <video
+            src={fileUrl}
+            controls
+            className="max-w-[240px] rounded-lg"
+          />
+          {content && <p className="mt-1 break-words">{content}</p>}
+        </div>
+      );
+    }
+
+    if (messageType === 'FILE' && fileUrl) {
+      return (
+        <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 underline underline-offset-2 break-all">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+          </svg>
+          {fileName || 'Download file'}
+        </a>
+      );
+    }
+
+    // default: plain text
+    return <p className="break-words">{content}</p>;
+  };
+
   return (
-    <div className={`flex ${isMe ? "justify-end" : "justify-start"} mb-4`}>
-      <div className={`px-5 py-3 rounded-2xl max-w-[70%] ${isMe ? "bg-gradient-to-br from-emerald-500 to-emerald-600 text-black" : "bg-[#1a1a1a] text-white border border-[#262626]"}`}>
-        <p className="break-words">{message.content}</p>
+    <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-4`}>
+      <div className={`px-5 py-3 rounded-2xl max-w-[70%] ${isMe ? 'bg-gradient-to-br from-emerald-500 to-emerald-600 text-black' : 'bg-[#1a1a1a] text-white border border-[#262626]'}`}>
+        {renderContent()}
         <div className="flex items-center justify-end mt-1 gap-1">
           <span className="text-[10px] text-black/60">
             {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

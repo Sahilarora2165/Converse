@@ -9,7 +9,8 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class FileUploadResponseDTO {
     private String fileName;
-    private String fileUrl;
+    private String fileUrl;      // final S3 URL — stored in message, used to display the file
+    private String presignedUrl; // temporary PUT URL — client uploads directly to S3 with this
     private String fileType;
     private long fileSize;
 }

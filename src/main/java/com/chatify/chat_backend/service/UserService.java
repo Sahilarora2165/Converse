@@ -5,6 +5,9 @@ import com.chatify.chat_backend.entity.User;
 import com.chatify.chat_backend.entity.enums.UserStatus;
 import com.chatify.chat_backend.exception.ResourceNotFoundException;
 import com.chatify.chat_backend.repository.UserRepository;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,6 +29,9 @@ public class UserService {
         return userRepository.findByEmail(email).isPresent();
     }
 
+    // cached by id — TTL 5 min as configured in RedisConfig
+    // key in Redis: "users::42"
+    @Cacheable(value = "users", key = "#id")
     @Transactional(readOnly = true)
     public UserDTO getUserById(Long id) {
         User user = userRepository.findById(id)
@@ -33,6 +39,9 @@ public class UserService {
         return mapToDTO(user);
     }
 
+    // cached by email — separate cache to allow lookup by both id and email
+    // key in Redis: "users-by-email::john@example.com"
+    @Cacheable(value = "users-by-email", key = "#email")
     @Transactional(readOnly = true)
     public UserDTO getUserByEmail(String email) {
         User user = userRepository.findByEmail(email)
@@ -40,12 +49,15 @@ public class UserService {
         return mapToDTO(user);
     }
 
+    // never cache — returns JPA entity with lazy collections
+    // caching entities causes detached session issues
     @Transactional(readOnly = true)
     public User getUserEntityByEmail(String email) {
         return userRepository.findByEmail(email)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "email", email));
     }
 
+    // never cache — same reason as getUserEntityByEmail
     @Transactional(readOnly = true)
     public User getUserEntityById(Long id) {
         return userRepository.findById(id)
@@ -66,6 +78,11 @@ public class UserService {
                 .collect(Collectors.toList());
     }
 
+    // evict both caches on status update — stale status in cache is worse than a cache miss
+    @Caching(evict = {
+            @CacheEvict(value = "users", key = "#userId"),
+            @CacheEvict(value = "users-by-email", allEntries = true)
+    })
     @Transactional
     public UserDTO updateUserStatus(Long userId, UserStatus status) {
         User user = userRepository.findById(userId)
@@ -78,6 +95,11 @@ public class UserService {
         return mapToDTO(savedUser);
     }
 
+    // evict both caches — lastSeen changed, cached DTO is now stale
+    @Caching(evict = {
+            @CacheEvict(value = "users", key = "#userId"),
+            @CacheEvict(value = "users-by-email", allEntries = true)
+    })
     @Transactional
     public void updateLastSeen(Long userId) {
         User user = userRepository.findById(userId)

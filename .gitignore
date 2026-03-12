@@ -29,6 +29,7 @@ Thumbs.db
 
 # Application properties that contain secrets (keep .example files)
 src/main/resources/application.properties
+src/main/resources/application-local.properties
 src/main/resources/application.yml
 src/main/resources/application-*.properties
 src/main/resources/application-*.yml

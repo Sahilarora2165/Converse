@@ -1,45 +1,50 @@
 import React from 'react';
 
-const MessageItem = ({ message, isMe, currentUserId }) => {
+// Double tick SVG — reused for SENT/DELIVERED/SEEN
+const DoubleTick = ({ color = 'currentColor' }) => (
+  <span className="inline-flex items-center relative" style={{ width: 18, height: 12 }}>
+    {/* First tick */}
+    <svg style={{ position: 'absolute', left: 0 }} width="12" height="12" viewBox="0 0 20 20" fill={color}>
+      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+    </svg>
+    {/* Second tick offset right */}
+    <svg style={{ position: 'absolute', left: 5 }} width="12" height="12" viewBox="0 0 20 20" fill={color}>
+      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+    </svg>
+  </span>
+);
 
-  const renderStatusIcon = () => {
-    if (!isMe) return null;
-    const isSeen = message.status === 'SEEN' || (message.readBy && message.readBy.includes(currentUserId));
+const SingleTick = () => (
+  <svg width="12" height="12" viewBox="0 0 20 20" fill="currentColor" className="text-gray-400">
+    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+  </svg>
+);
 
-    if (isSeen) {
-      return (
-        <div className="ml-2 flex-shrink-0 relative w-4 h-4 text-blue-400">
-          <svg className="absolute left-0 w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-          </svg>
-          <svg className="absolute -right-1.5 w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-          </svg>
-        </div>
-      );
-    }
+const MessageStatus = ({ message, isOwnMessage }) => {
+  if (!isOwnMessage) return null;
 
-    if (message.status === 'DELIVERED') {
-      return (
-        <div className="ml-2 flex-shrink-0 relative w-4 h-4 text-gray-400">
-          <svg className="absolute left-0 w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-          </svg>
-          <svg className="absolute -right-1.5 w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-          </svg>
-        </div>
-      );
-    }
+  const isSeen = message.status === 'SEEN';
+  const isDelivered = message.status === 'DELIVERED';
 
-    return (
-      <svg className="w-4 h-4 text-gray-500 ml-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-      </svg>
-    );
-  };
+  if (isSeen) return <DoubleTick color="#34d399" />;       // emerald — seen
+  if (isDelivered) return <DoubleTick color="#6b7280" />;  // gray — delivered
+  return <SingleTick />;                                    // gray single — sent
+};
 
-  // renders image, video, file, or text based on messageType
+const MessageItem = ({
+  message,
+  isOwnMessage,
+  isMe,
+  currentUserId,
+  showSender,
+  isGroupChat,
+  participants,
+  isFirstInSequence,
+  isLastInSequence,
+}) => {
+  // Support both prop names for backward compat
+  const own = isOwnMessage ?? isMe ?? false;
+
   const renderContent = () => {
     const { messageType, fileUrl, fileName, content } = message;
 
@@ -49,10 +54,13 @@ const MessageItem = ({ message, isMe, currentUserId }) => {
           <img
             src={fileUrl}
             alt={fileName || 'Image'}
-            className="max-w-[240px] rounded-lg cursor-pointer"
+            className="max-w-[220px] rounded-xl cursor-pointer object-cover"
+            style={{ maxHeight: 260 }}
             onClick={() => window.open(fileUrl, '_blank')}
           />
-          {content && <p className="mt-1 break-words">{content}</p>}
+          {content && (
+            <p className="mt-1.5 text-sm leading-relaxed break-words">{content}</p>
+          )}
         </div>
       );
     }
@@ -63,37 +71,108 @@ const MessageItem = ({ message, isMe, currentUserId }) => {
           <video
             src={fileUrl}
             controls
-            className="max-w-[240px] rounded-lg"
+            className="max-w-[220px] rounded-xl"
+            style={{ maxHeight: 260 }}
           />
-          {content && <p className="mt-1 break-words">{content}</p>}
+          {content && (
+            <p className="mt-1.5 text-sm leading-relaxed break-words">{content}</p>
+          )}
         </div>
       );
     }
 
     if (messageType === 'FILE' && fileUrl) {
       return (
-        <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 underline underline-offset-2 break-all">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-          </svg>
+        <a
+          href={fileUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2.5 text-sm underline underline-offset-2 break-all"
+        >
+          <span className="flex-shrink-0 w-8 h-8 rounded-lg bg-black/20 flex items-center justify-center">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+            </svg>
+          </span>
           {fileName || 'Download file'}
         </a>
       );
     }
 
-    // default: plain text
-    return <p className="break-words">{content}</p>;
+    // Plain text
+    return (
+      <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{content}</p>
+    );
   };
 
+  // Sender name color — derive from participant id for consistent color per user
+  const getSenderColor = (senderId) => {
+    const colors = [
+      '#f87171', '#fb923c', '#facc15', '#4ade80',
+      '#34d399', '#38bdf8', '#a78bfa', '#f472b6',
+    ];
+    return colors[senderId % colors.length];
+  };
+
+  // Bubble radius — tighter radius on connected bubbles in a sequence
+  const bubbleRadius = own
+    ? [
+        isFirstInSequence ? '18px' : '6px',  // top-left
+        isFirstInSequence ? '18px' : '18px', // top-right
+        isLastInSequence  ? '4px'  : '18px', // bottom-right (tail side)
+        isLastInSequence  ? '18px' : '18px', // bottom-left
+      ].join(' ')
+    : [
+        isFirstInSequence ? '18px' : '18px', // top-left
+        isFirstInSequence ? '18px' : '6px',  // top-right
+        isLastInSequence  ? '18px' : '18px', // bottom-right
+        isLastInSequence  ? '4px'  : '18px', // bottom-left (tail side)
+      ].join(' ');
+
   return (
-    <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-4`}>
-      <div className={`px-5 py-3 rounded-2xl max-w-[70%] ${isMe ? 'bg-gradient-to-br from-emerald-500 to-emerald-600 text-black' : 'bg-[#1a1a1a] text-white border border-[#262626]'}`}>
+    <div
+      className={`flex ${own ? 'justify-end' : 'justify-start'} px-2`}
+      style={{ marginBottom: isLastInSequence ? 6 : 2 }}
+    >
+      <div
+        className={`
+          relative max-w-[72%] px-3.5 py-2.5
+          ${own
+            ? 'bg-emerald-600 text-white'
+            : 'bg-[#1e1e1e] text-gray-100 border border-[#2a2a2a]'
+          }
+        `}
+        style={{ borderRadius: bubbleRadius }}
+      >
+        {/* Sender name in group chats */}
+        {showSender && (
+          <p
+            className="text-[11px] font-semibold mb-1 leading-none"
+            style={{ color: getSenderColor(message.senderId) }}
+          >
+            {participants?.find((p) => p.id === message.senderId)?.username || 'Unknown'}
+          </p>
+        )}
+
         {renderContent()}
-        <div className="flex items-center justify-end mt-1 gap-1">
-          <span className="text-[10px] text-black/60">
-            {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+
+        {/* Timestamp + status row */}
+        <div className={`flex items-center gap-1 mt-1 ${own ? 'justify-end' : 'justify-end'}`}>
+          <span
+            className={`text-[10px] leading-none ${
+              own ? 'text-emerald-200/70' : 'text-gray-500'
+            }`}
+          >
+            {new Date(message.timestamp).toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
           </span>
-          {renderStatusIcon()}
+          {own && (
+            <span className={`${message.status === 'SEEN' ? 'text-emerald-300' : 'text-gray-400'}`}>
+              <MessageStatus message={message} isOwnMessage={own} />
+            </span>
+          )}
         </div>
       </div>
     </div>

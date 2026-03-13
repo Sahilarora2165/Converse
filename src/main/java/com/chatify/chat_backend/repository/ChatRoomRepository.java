@@ -43,6 +43,9 @@ public interface ChatRoomRepository extends JpaRepository<ChatRoom, Long> {
 
     List<ChatRoom> findByIsGroupChatTrue();
 
+    @Query("SELECT COUNT(u) > 0 FROM ChatRoom c JOIN c.participants u WHERE c.id = :chatRoomId AND u.id = :userId")
+    boolean existsByIdAndParticipantId(@Param("chatRoomId") Long chatRoomId, @Param("userId") Long userId);
+
     @Query("SELECT cr FROM ChatRoom cr WHERE cr.admin = :admin")
     List<ChatRoom> findByAdmin(@Param("admin") User admin);
 }

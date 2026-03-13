@@ -3,6 +3,7 @@ package com.chatify.chat_backend.controller;
 import com.chatify.chat_backend.dto.*;
 import com.chatify.chat_backend.entity.User;
 import com.chatify.chat_backend.service.ChatRoomService;
+import com.chatify.chat_backend.service.KafkaProducerService;
 import com.chatify.chat_backend.service.MessageService;
 import com.chatify.chat_backend.service.PresenceService;
 import com.chatify.chat_backend.service.UserService;
@@ -29,44 +30,60 @@ public class ChatWebSocketController {
     private final UserService userService;
     private final ChatRoomService chatRoomService;
     private final PresenceService presenceService;
+    private final KafkaProducerService kafkaProducerService;
 
     public ChatWebSocketController(SimpMessageSendingOperations messagingTemplate,
                                    MessageService messageService,
                                    UserService userService,
                                    ChatRoomService chatRoomService,
-                                   PresenceService presenceService) {
+                                   PresenceService presenceService,
+                                   KafkaProducerService kafkaProducerService) {
         this.messagingTemplate = messagingTemplate;
         this.messageService = messageService;
         this.userService = userService;
         this.chatRoomService = chatRoomService;
         this.presenceService = presenceService;
+        this.kafkaProducerService = kafkaProducerService;
     }
 
+    /**
+     * Legacy handler — kept for backward compatibility.
+     * Also routes through Kafka now.
+     */
     @MessageMapping("/chat.sendMessage")
     public void sendMessage(@Payload SendMessageDTO messageDTO, Principal principal) {
-        if (principal == null) {
-            return;
-        }
+        if (principal == null) return;
 
         String email = principal.getName();
         User sender = userService.getUserEntityByEmail(email);
 
         if (!chatRoomService.isUserInChatRoom(messageDTO.getChatRoomId(), sender.getId())) {
+            log.warn("User {} is not in room {}", sender.getId(), messageDTO.getChatRoomId());
             return;
         }
 
-        MessageDTO savedMessage = messageService.sendMessage(messageDTO, sender.getId());
+        ChatMessageEvent event = new ChatMessageEvent(
+                messageDTO.getChatRoomId(),
+                sender.getId(),
+                messageDTO.getContent(),
+                messageDTO.getMessageType(),
+                messageDTO.getFileUrl(),
+                messageDTO.getFileName()
+        );
 
-        messagingTemplate.convertAndSend(
-                "/topic/chatroom/" + messageDTO.getChatRoomId(),
-                savedMessage);
+        kafkaProducerService.publishChatMessage(event);
     }
 
+    /**
+     * Primary handler used by the frontend (WebSocketContext.jsx).
+     * Publishes event to Kafka. Consumer handles DB save + WebSocket broadcast.
+     */
     @MessageMapping("/chat/{roomId}/sendMessage")
     public void sendMessage(
             @DestinationVariable Long roomId,
             @Payload SendMessageDTO sendMessageDTO,
             Principal principal) {
+
         if (principal == null) {
             log.warn("WebSocket message rejected: principal is null for room {}", roomId);
             return;
@@ -75,18 +92,26 @@ public class ChatWebSocketController {
         String email = principal.getName();
         User user = userService.getUserEntityByEmail(email);
 
-        sendMessageDTO.setChatRoomId(roomId);
+        if (!chatRoomService.isUserInChatRoom(roomId, user.getId())) {
+            log.warn("User {} is not in room {}", user.getId(), roomId);
+            return;
+        }
 
-        MessageDTO savedMessage = messageService.sendMessage(sendMessageDTO, user.getId());
+        ChatMessageEvent event = new ChatMessageEvent(
+                roomId,
+                user.getId(),
+                sendMessageDTO.getContent(),
+                sendMessageDTO.getMessageType(),
+                sendMessageDTO.getFileUrl(),
+                sendMessageDTO.getFileName()
+        );
 
-        messagingTemplate.convertAndSend("/topic/chatroom/" + roomId, savedMessage);
+        kafkaProducerService.publishChatMessage(event);
     }
 
     @MessageMapping("/chat.read/{messageId}")
     public void handleReadReceipt(@DestinationVariable Long messageId, Principal principal) {
-        if (principal == null) {
-            return;
-        }
+        if (principal == null) return;
 
         String email = principal.getName();
         User user = userService.getUserEntityByEmail(email);
@@ -107,9 +132,7 @@ public class ChatWebSocketController {
 
     @MessageMapping("/presence.update")
     public void updatePresence(@Payload OnlineStatusDTO statusDTO, Principal principal) {
-        if (principal == null) {
-            return;
-        }
+        if (principal == null) return;
 
         String email = principal.getName();
         User user = userService.getUserEntityByEmail(email);
@@ -119,12 +142,8 @@ public class ChatWebSocketController {
     }
 
     @MessageMapping("/chat.delivered")
-    public void handleDeliveredAck(
-            @Payload MessageDeliveredAckDTO ack,
-            Principal principal) {
-        if (principal == null) {
-            return;
-        }
+    public void handleDeliveredAck(@Payload MessageDeliveredAckDTO ack, Principal principal) {
+        if (principal == null) return;
 
         String email = principal.getName();
         User user = userService.getUserEntityByEmail(email);
@@ -142,12 +161,8 @@ public class ChatWebSocketController {
     }
 
     @MessageMapping("/chat.seen")
-    public void handleSeenAck(
-            @Payload MessageSeenAckDTO ack,
-            Principal principal) {
-        if (principal == null) {
-            return;
-        }
+    public void handleSeenAck(@Payload MessageSeenAckDTO ack, Principal principal) {
+        if (principal == null) return;
 
         String email = principal.getName();
         User user = userService.getUserEntityByEmail(email);
@@ -163,5 +178,4 @@ public class ChatWebSocketController {
                     update);
         }
     }
-
 }

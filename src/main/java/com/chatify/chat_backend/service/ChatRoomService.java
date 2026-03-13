@@ -212,9 +212,7 @@ public class ChatRoomService {
     }
 
     public boolean isUserInChatRoom(Long chatRoomId, Long userId) {
-        ChatRoom chatRoom = getChatRoomEntity(chatRoomId);
-        User user = userService.getUserEntityById(userId);
-        return chatRoom.getParticipants().contains(user);
+        return chatRoomRepository.existsByIdAndParticipantId(chatRoomId, userId);
     }
 
     @Transactional

@@ -13,158 +13,188 @@ import OnlineStatus from '../Common/OnlineStatus';
 import { getChatDisplayName, getOtherParticipant } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 
+const NEAR_BOTTOM_THRESHOLD = 120; // px from bottom to consider "near bottom"
+
 const ChatWindow = ({ chatRoomId, onChatUpdated }) => {
   const { user } = useAuth();
-  const { subscribeToChatRoom, unsubscribeFromChatRoom, isConnected, isUserOnline, setReadReceiptCallback } = useWebSocket();
-  
-  const [chatRoom, setChatRoom] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [showGroupInfo, setShowGroupInfo] = useState(false);
-  const [isSubscribed, setIsSubscribed] = useState(false);
-  const messagesEndRef = useRef(null);
-  const previousChatRoomIdRef = useRef(null);
-  const loadedMessagesRef = useRef(new Set());
-  const isLoadingRef = useRef(false);
+  const {
+    subscribeToChatRoom,
+    unsubscribeFromChatRoom,
+    isConnected,
+    isUserOnline,
+    setReadReceiptCallback,
+  } = useWebSocket();
 
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const [chatRoom, setChatRoom]       = useState(null);
+  const [messages, setMessages]       = useState([]);
+  const [loading, setLoading]         = useState(false);
+  const [showGroupInfo, setShowGroupInfo] = useState(false);
+  const [isSubscribed, setIsSubscribed]   = useState(false);
+
+  const scrollContainerRef  = useRef(null); // the scrollable div
+  const bottomAnchorRef     = useRef(null); // invisible div at end of list
+  const loadedIdsRef        = useRef(new Set());
+  const isLoadingRef        = useRef(false);
+  const shouldScrollRef     = useRef(true);  // true = always snap to bottom on initial load
+
+  // ─── Scroll helpers ─────────────────────────────────────────────────────────
+  const isNearBottom = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_THRESHOLD;
   }, []);
 
+  // Instant jump — used on initial load
+  const scrollToBottomInstant = useCallback(() => {
+    bottomAnchorRef.current?.scrollIntoView({ behavior: 'instant', block: 'end' });
+  }, []);
+
+  // Smooth scroll — used for new incoming messages when user is near bottom
+  const scrollToBottomSmooth = useCallback(() => {
+    bottomAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, []);
+
+  // ─── Load data ───────────────────────────────────────────────────────────────
   const loadChatRoom = useCallback(async () => {
     if (!chatRoomId) return;
-    
     try {
       const data = await getChatRoomById(chatRoomId);
       setChatRoom(data);
-    } catch (error) {
-      console.error('Failed to load chat room:', error);
+    } catch {
       toast.error('Failed to load chat room');
     }
   }, [chatRoomId]);
 
- const loadMessages = useCallback(async () => {
-     if (!chatRoomId || isLoadingRef.current) return;
-     try {
-         isLoadingRef.current = true;
-         setLoading(true);
-         const data = await getMessages(chatRoomId);
+  const loadMessages = useCallback(async () => {
+    if (!chatRoomId || isLoadingRef.current) return;
+    try {
+      isLoadingRef.current = true;
+      setLoading(true);
+      shouldScrollRef.current = true; // force snap on fresh load
 
-         loadedMessagesRef.current = new Set(data.map(m => m.id));
-         setMessages(data);
+      const data = await getMessages(chatRoomId);
+      loadedIdsRef.current = new Set(data.map((m) => m.id));
+      setMessages(data);
 
-         // Mark all messages as read when opening the chat
-         await markAllMessagesAsRead(chatRoomId);
+      await markAllMessagesAsRead(chatRoomId);
+      if (onChatUpdated) onChatUpdated();
+    } catch {
+      toast.error('Failed to load messages');
+    } finally {
+      setLoading(false);
+      isLoadingRef.current = false;
+    }
+  }, [chatRoomId, onChatUpdated]);
 
-         if (onChatUpdated) onChatUpdated();
-     } catch (error) {
-         console.error('Failed to load messages:', error);
-         toast.error('Failed to load messages');
-     } finally {
-         setLoading(false);
-         isLoadingRef.current = false;
-     }
- }, [chatRoomId, onChatUpdated]);
+  // ─── Scroll to bottom after messages render ──────────────────────────────────
+  // This runs after every messages state change.
+  // shouldScrollRef.current = true  → instant jump (initial load / room switch)
+  // isNearBottom()           = true → smooth scroll (new message arrived)
+  useEffect(() => {
+    if (loading || messages.length === 0) return;
 
+    if (shouldScrollRef.current) {
+      // Use rAF to ensure DOM has painted before measuring
+      requestAnimationFrame(() => {
+        scrollToBottomInstant();
+        shouldScrollRef.current = false;
+      });
+    } else if (isNearBottom()) {
+      scrollToBottomSmooth();
+    }
+  }, [messages, loading, isNearBottom, scrollToBottomInstant, scrollToBottomSmooth]);
+
+  // ─── WebSocket handlers ──────────────────────────────────────────────────────
   const handleNewMessage = useCallback((message) => {
-    if (!message || !message.id) return;
-    
+    if (!message?.id) return;
     setMessages((prev) => {
-      // Avoid duplicates using both array check and ref set
-      if (prev.some((m) => m.id === message.id) || loadedMessagesRef.current.has(message.id)) {
+      if (prev.some((m) => m.id === message.id) || loadedIdsRef.current.has(message.id)) {
         return prev;
       }
-      loadedMessagesRef.current.add(message.id);
+      loadedIdsRef.current.add(message.id);
       return [...prev, message];
     });
-    scrollToBottom();
-    
-    // Mark as read if it's from someone else
+
     if (message.senderId !== user?.id) {
       markAllMessagesAsRead(chatRoomId).catch(console.error);
       if (onChatUpdated) onChatUpdated();
     }
-  }, [chatRoomId, user?.id, scrollToBottom, onChatUpdated]);
+  }, [chatRoomId, user?.id, onChatUpdated]);
 
   const handleReadReceipt = useCallback((receipt) => {
-    setMessages((prev) => 
-      prev.map((msg) => {
-        if (msg.id === receipt.messageId) {
-          return {
-            ...msg,
-            readByUserIds: receipt.readByUserIds || [...(msg.readByUserIds || []), receipt.userId],
-          };
-        }
-        return msg;
-      })
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg.id === receipt.messageId
+          ? {
+              ...msg,
+              readByUserIds: receipt.readByUserIds ||
+                [...(msg.readByUserIds || []), receipt.userId],
+            }
+          : msg
+      )
     );
   }, []);
 
   const handleMessageSent = useCallback((message) => {
-    if (!message || !message.id) return;
-    
+    if (!message?.id) return;
     setMessages((prev) => {
-      // Avoid duplicates using both array check and ref set
-      if (prev.some((m) => m.id === message.id) || loadedMessagesRef.current.has(message.id)) {
+      if (prev.some((m) => m.id === message.id) || loadedIdsRef.current.has(message.id)) {
         return prev;
       }
-      loadedMessagesRef.current.add(message.id);
+      loadedIdsRef.current.add(message.id);
       return [...prev, message];
     });
-    scrollToBottom();
     if (onChatUpdated) onChatUpdated();
-  }, [scrollToBottom, onChatUpdated]);
+  }, [onChatUpdated]);
 
-  // Load chat room and messages when chatRoomId changes
+  // ─── Reset on room switch ────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!chatRoomId) return;
+    // Reset state for new room
+    setMessages([]);
+    setChatRoom(null);
+    setIsSubscribed(false);
+    loadedIdsRef.current = new Set();
+    shouldScrollRef.current = true;
 
-    useEffect(() => {
-        if (chatRoomId) {
-            loadChatRoom();
-            loadMessages();
-    }
-}, [chatRoomId, loadChatRoom, loadMessages]);
+    loadChatRoom();
+    loadMessages();
+  }, [chatRoomId]); // intentionally only chatRoomId — not loadChatRoom/loadMessages
 
-  // Subscribe to WebSocket after messages are loaded to prevent race conditions
+  // ─── Subscribe after load ────────────────────────────────────────────────────
   useEffect(() => {
     if (!chatRoomId || loading || isSubscribed) return;
-    
-    // Only subscribe after messages have finished loading (loading is false and not in loading state)
     if (!isLoadingRef.current) {
       subscribeToChatRoom(chatRoomId, handleNewMessage);
       setReadReceiptCallback(chatRoomId, handleReadReceipt);
       setIsSubscribed(true);
     }
-
     return () => {
       if (chatRoomId && isSubscribed) {
         unsubscribeFromChatRoom(chatRoomId);
         setIsSubscribed(false);
       }
     };
-  }, [chatRoomId, loading, isSubscribed, subscribeToChatRoom, unsubscribeFromChatRoom, handleNewMessage, handleReadReceipt, setReadReceiptCallback]);
+  }, [chatRoomId, loading, isSubscribed, subscribeToChatRoom, unsubscribeFromChatRoom,
+      handleNewMessage, handleReadReceipt, setReadReceiptCallback]);
 
-  // Re-subscribe when WebSocket reconnects
+  // Re-subscribe on reconnect
   useEffect(() => {
     if (isConnected && chatRoomId && !isSubscribed && !loading) {
       subscribeToChatRoom(chatRoomId, handleNewMessage);
       setReadReceiptCallback(chatRoomId, handleReadReceipt);
       setIsSubscribed(true);
     }
-  }, [isConnected, chatRoomId, isSubscribed, loading, subscribeToChatRoom, handleNewMessage, handleReadReceipt, setReadReceiptCallback]);
+  }, [isConnected, chatRoomId, isSubscribed, loading, subscribeToChatRoom,
+      handleNewMessage, handleReadReceipt, setReadReceiptCallback]);
 
-  // Scroll to bottom when messages load
-  useEffect(() => {
-    if (!loading) {
-      scrollToBottom();
-    }
-  }, [loading, scrollToBottom]);
-
+  // ─── Empty state ─────────────────────────────────────────────────────────────
   if (!chatRoomId) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-gray-50">
+      <div className="flex-1 flex items-center justify-center bg-[#0a0a0a]">
         <div className="text-center">
           <div className="text-6xl mb-4">💬</div>
-          <h2 className="text-xl font-semibold text-gray-700">Welcome to Chatify</h2>
+          <h2 className="text-xl font-semibold text-gray-300">Welcome to Chatify</h2>
           <p className="text-gray-500 mt-2">Select a chat to start messaging</p>
         </div>
       </div>
@@ -173,28 +203,31 @@ const ChatWindow = ({ chatRoomId, onChatUpdated }) => {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-gray-50">
+      <div className="flex-1 flex items-center justify-center bg-[#0a0a0a]">
         <LoadingSpinner size="lg" />
       </div>
     );
   }
 
-  const otherParticipant = !chatRoom?.isGroupChat ? getOtherParticipant(chatRoom, user?.id) : null;
+  const otherParticipant = !chatRoom?.isGroupChat
+    ? getOtherParticipant(chatRoom, user?.id)
+    : null;
   const isOtherOnline = otherParticipant ? isUserOnline(otherParticipant.id) : false;
 
   return (
-    <div className="flex-1 flex flex-col bg-gray-50">
-      {/* Chat Header */}
-      <div className="bg-white border-b px-4 py-3 flex items-center justify-between shadow-sm">
+    <div className="flex-1 flex flex-col bg-[#0a0a0a] h-full overflow-hidden">
+
+      {/* ── Header ── */}
+      <div className="bg-[#111111] border-b border-[#1f1f1f] px-4 py-3 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-3">
-          <Avatar 
+          <Avatar
             user={otherParticipant || { username: chatRoom?.name }}
             size="md"
             showStatus={!chatRoom?.isGroupChat}
             isOnline={isOtherOnline}
           />
           <div>
-            <h2 className="font-semibold text-gray-800">
+            <h2 className="font-semibold text-gray-100 text-sm">
               {getChatDisplayName(chatRoom, user?.id)}
             </h2>
             {chatRoom?.isGroupChat ? (
@@ -206,11 +239,11 @@ const ChatWindow = ({ chatRoomId, onChatUpdated }) => {
             )}
           </div>
         </div>
-        
+
         {chatRoom?.isGroupChat && (
           <button
             onClick={() => setShowGroupInfo(true)}
-            className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
+            className="p-2 text-gray-500 hover:text-gray-300 hover:bg-[#1f1f1f] rounded-full transition-colors"
             title="Group Info"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -220,25 +253,34 @@ const ChatWindow = ({ chatRoomId, onChatUpdated }) => {
         )}
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4">
-        <MessageList messages={messages} currentUserId={user?.id} chatRoom={chatRoom} />
-        <div ref={messagesEndRef} />
+      {/* ── Messages scroll area ── */}
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto px-4 py-4 scroll-smooth"
+        style={{ overflowAnchor: 'none' }} // disable browser's own scroll anchor — we control it
+      >
+        <MessageList
+          messages={messages}
+          currentUserId={user?.id}
+          chatRoom={chatRoom}
+        />
+        {/* Invisible anchor — scrollIntoView targets this */}
+        <div ref={bottomAnchorRef} style={{ height: 1 }} />
       </div>
 
-      {/* Typing Indicator */}
+      {/* ── Typing indicator ── */}
       <TypingIndicator chatRoomId={chatRoomId} />
 
-      {/* Message Input */}
-      <MessageInput 
-        chatRoomId={chatRoomId} 
+      {/* ── Input ── */}
+      <MessageInput
+        chatRoomId={chatRoomId}
         onMessageSent={handleMessageSent}
       />
 
-      {/* Group Info Modal */}
+      {/* ── Group Info Modal ── */}
       {showGroupInfo && chatRoom?.isGroupChat && (
-        <GroupInfo 
-          chatRoom={chatRoom} 
+        <GroupInfo
+          chatRoom={chatRoom}
           onClose={() => setShowGroupInfo(false)}
           onChatRoomUpdated={(updated) => {
             setChatRoom(updated);

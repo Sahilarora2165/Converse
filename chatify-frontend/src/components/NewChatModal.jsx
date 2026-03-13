@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { searchUsers, getAllUsers, createChatRoom } from '../services/api';
 import useAuth from '../hooks/useAuth';
-import Avatar from './Common/Avatar'; // Assuming path based on previous files
-import LoadingSpinner from './Common/LoadingSpinner';
 import toast from 'react-hot-toast';
+import { X, Search, Users, MessageSquare, Loader2, Check } from 'lucide-react';
 
 const NewChatModal = ({ onClose, onChatCreated }) => {
     const { user: currentUser } = useAuth();
@@ -15,12 +14,10 @@ const NewChatModal = ({ onClose, onChatCreated }) => {
     const [isGroup, setIsGroup] = useState(false);
     const [groupName, setGroupName] = useState('');
 
-    // Load all users initially so the list isn't empty
     const loadInitialUsers = useCallback(async () => {
         setLoading(true);
         try {
             const { data } = await getAllUsers();
-            // Filter out current user from the list
             setUsers(data.filter(u => u.id !== currentUser?.id));
         } catch (err) {
             console.error("Failed to load users", err);
@@ -40,7 +37,6 @@ const NewChatModal = ({ onClose, onChatCreated }) => {
             loadInitialUsers();
             return;
         }
-
         setLoading(true);
         try {
             const { data } = await searchUsers(searchTerm);
@@ -54,10 +50,8 @@ const NewChatModal = ({ onClose, onChatCreated }) => {
 
     const toggleUserSelect = (user) => {
         if (!isGroup) {
-            // In Direct Message mode, clicking a user starts the chat immediately
             handleCreateChat(user.username, false, [user.id]);
         } else {
-            // In Group mode, toggle selection
             const isSelected = selectedUsers.find(u => u.id === user.id);
             if (isSelected) {
                 setSelectedUsers(selectedUsers.filter(u => u.id !== user.id));
@@ -72,14 +66,10 @@ const NewChatModal = ({ onClose, onChatCreated }) => {
             toast.error("Please enter a group name");
             return;
         }
-
         setCreating(true);
         try {
-            // This matches api.js: createChatRoom(name, isGroup, participantIds)
-            // Which then sends { name, isGroupChat: groupFlag, participantIds } to backend
             const { data } = await createChatRoom(name, groupFlag, participantIds);
-
-            onChatCreated(data); // Pass the new ChatRoomDTO to Chat.jsx
+            onChatCreated(data);
             onClose();
             toast.success(groupFlag ? "Group created!" : "Chat started!");
         } catch (err) {
@@ -91,48 +81,64 @@ const NewChatModal = ({ onClose, onChatCreated }) => {
     };
 
     return (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
+            <div
+                className="bg-zinc-950 border border-white/[0.06] rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
+            >
                 {/* Header */}
-                <div className="p-6 border-b border-slate-800 flex items-center justify-between">
+                <div className="px-6 pt-6 pb-4 flex items-center justify-between">
                     <div>
-                        <h2 className="text-xl font-bold text-white tracking-tight">New Collaboration</h2>
-                        <p className="text-xs text-slate-500 mt-1 uppercase tracking-widest font-semibold">
-                            {isGroup ? 'Assemble your team' : 'Start a private secure line'}
+                        <h2 className="text-lg font-semibold text-white tracking-tight">New Conversation</h2>
+                        <p className="text-[11px] text-zinc-500 mt-0.5">
+                            {isGroup ? 'Add members to your group' : 'Select a user to message'}
                         </p>
                     </div>
-                    <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-all">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
+                    <button
+                        onClick={onClose}
+                        className="p-2 text-zinc-500 hover:text-white hover:bg-white/[0.04] rounded-lg transition-all duration-200"
+                    >
+                        <X className="w-4 h-4" />
                     </button>
                 </div>
 
-                {/* Tabs */}
-                <div className="flex px-6 pt-4 gap-6 border-b border-slate-800/50">
+                {/* Tab Switcher — matches sidebar tabs exactly */}
+                <div className="mx-6 flex p-0.5 bg-zinc-900/50 rounded-xl border border-white/[0.03] mb-4">
                     <button
-                        className={`pb-3 text-sm font-bold transition-all ${!isGroup ? 'text-blue-500 border-b-2 border-blue-500' : 'text-slate-500 hover:text-slate-300'}`}
+                        className={`flex-1 py-2 text-xs font-medium rounded-lg transition-all duration-200 flex items-center justify-center gap-1.5 ${
+                            !isGroup
+                                ? 'bg-zinc-800 text-white shadow-sm'
+                                : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
                         onClick={() => { setIsGroup(false); setSelectedUsers([]); }}
                     >
-                        DIRECT MESSAGE
+                        <MessageSquare className="w-3.5 h-3.5" />
+                        Direct
                     </button>
                     <button
-                        className={`pb-3 text-sm font-bold transition-all ${isGroup ? 'text-blue-500 border-b-2 border-blue-500' : 'text-slate-500 hover:text-slate-300'}`}
+                        className={`flex-1 py-2 text-xs font-medium rounded-lg transition-all duration-200 flex items-center justify-center gap-1.5 ${
+                            isGroup
+                                ? 'bg-zinc-800 text-white shadow-sm'
+                                : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
                         onClick={() => setIsGroup(true)}
                     >
-                        GROUP CHAT
+                        <Users className="w-3.5 h-3.5" />
+                        Group
                     </button>
                 </div>
 
-                <div className="p-6 space-y-4">
+                <div className="px-6 pb-2 space-y-3">
                     {/* Group Name Input */}
                     {isGroup && (
-                        <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Group Name</label>
+                        <div>
+                            <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider ml-0.5 mb-1 block">
+                                Group Name
+                            </label>
                             <input
                                 type="text"
                                 placeholder="e.g. Project Alpha"
-                                className="w-full bg-slate-950 border border-slate-800 text-white px-4 py-3 rounded-xl focus:ring-2 focus:ring-blue-600 outline-none transition-all"
+                                className="w-full bg-zinc-900 border border-white/[0.06] text-zinc-100 text-sm px-4 py-2.5 rounded-xl focus:outline-none focus:border-indigo-500/40 placeholder-zinc-600 transition-all duration-200"
                                 value={groupName}
                                 onChange={e => setGroupName(e.target.value)}
                             />
@@ -140,67 +146,109 @@ const NewChatModal = ({ onClose, onChatCreated }) => {
                     )}
 
                     {/* Search */}
-                    <form onSubmit={handleSearch} className="relative group">
+                    <form onSubmit={handleSearch} className="relative">
+                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" />
                         <input
                             type="text"
-                            placeholder="Search users by name..."
-                            className="w-full bg-slate-950 border border-slate-800 text-white pl-11 pr-4 py-3 rounded-xl focus:ring-2 focus:ring-blue-600 outline-none transition-all"
+                            placeholder="Search users..."
+                            className="w-full bg-zinc-900 border border-white/[0.06] text-zinc-100 text-sm pl-10 pr-4 py-2.5 rounded-xl focus:outline-none focus:border-indigo-500/40 placeholder-zinc-600 transition-all duration-200"
                             value={searchTerm}
                             onChange={e => setSearchTerm(e.target.value)}
                         />
-                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-blue-500">
-                            🔍
-                        </span>
                     </form>
 
-                    {/* Users List */}
-                    <div className="max-h-60 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-                        {loading ? (
-                            <div className="py-10 flex justify-center"><LoadingSpinner /></div>
-                        ) : users.length === 0 ? (
-                            <p className="text-center py-10 text-slate-500 text-sm italic">No agents found on the network.</p>
-                        ) : (
-                            users.map(u => {
-                                const isSelected = selectedUsers.find(s => s.id === u.id);
-                                return (
+                    {/* Selected chips for group mode */}
+                    {isGroup && selectedUsers.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                            {selectedUsers.map(u => (
+                                <span
+                                    key={u.id}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-500/[0.12] border border-indigo-500/20 text-indigo-300 text-[11px] font-medium rounded-lg"
+                                >
+                                    {u.username}
                                     <button
-                                        key={u.id}
-                                        onClick={() => toggleUserSelect(u)}
-                                        disabled={creating}
-                                        className={`w-full p-3 rounded-xl flex items-center gap-3 transition-all border text-left
-                                            ${isSelected
-                                                ? 'bg-blue-600/10 border-blue-600/50'
-                                                : 'bg-slate-950/50 border-slate-800 hover:bg-slate-800/50 hover:border-slate-700'}`}
+                                        onClick={() => setSelectedUsers(selectedUsers.filter(s => s.id !== u.id))}
+                                        className="hover:text-white transition-colors"
                                     >
-                                        <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center font-bold text-slate-400 border border-slate-700">
-                                            {u.username.charAt(0).toUpperCase()}
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="font-bold text-slate-200 truncate">{u.username}</p>
-                                            <p className="text-[10px] text-slate-500 truncate">{u.email}</p>
-                                        </div>
-                                        {isGroup && (
-                                            <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all
-                                                ${isSelected ? 'bg-blue-600 border-blue-600' : 'border-slate-700'}`}>
-                                                {isSelected && <span className="text-white text-[10px]">✓</span>}
-                                            </div>
-                                        )}
+                                        <X className="w-3 h-3" />
                                     </button>
-                                );
-                            })
-                        )}
-                    </div>
+                                </span>
+                            ))}
+                        </div>
+                    )}
                 </div>
 
-                {/* Footer Action */}
+                {/* Users List */}
+                <div className="max-h-64 overflow-y-auto px-6 pb-4 space-y-1 custom-scrollbar">
+                    {loading ? (
+                        <div className="py-12 flex flex-col items-center gap-3">
+                            <Loader2 className="w-5 h-5 text-indigo-400 animate-spin" />
+                            <p className="text-xs text-zinc-600">Loading users</p>
+                        </div>
+                    ) : users.length === 0 ? (
+                        <div className="py-12 text-center">
+                            <p className="text-sm text-zinc-600">No users found</p>
+                        </div>
+                    ) : (
+                        users.map(u => {
+                            const isSelected = selectedUsers.find(s => s.id === u.id);
+                            return (
+                                <button
+                                    key={u.id}
+                                    onClick={() => toggleUserSelect(u)}
+                                    disabled={creating}
+                                    className={`w-full px-3 py-3 rounded-xl flex items-center gap-3 transition-all duration-200 text-left border ${
+                                        isSelected
+                                            ? 'bg-indigo-500/[0.08] border-indigo-500/20'
+                                            : 'border-transparent hover:bg-white/[0.03]'
+                                    } disabled:opacity-50`}
+                                >
+                                    {/* user avatar — matches sidebar avatar style */}
+                                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-sm font-bold transition-all duration-300 ${
+                                        isSelected
+                                            ? 'bg-indigo-500 text-white'
+                                            : 'bg-zinc-800 text-zinc-400'
+                                    }`}>
+                                        {u.username.charAt(0).toUpperCase()}
+                                    </div>
+
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-[13px] font-semibold text-zinc-200 truncate">{u.username}</p>
+                                        <p className="text-[11px] text-zinc-600 truncate">{u.email}</p>
+                                    </div>
+
+                                    {/* checkbox for group mode */}
+                                    {isGroup && (
+                                        <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all duration-200 flex-shrink-0 ${
+                                            isSelected
+                                                ? 'bg-indigo-500 border-indigo-500'
+                                                : 'border-zinc-700'
+                                        }`}>
+                                            {isSelected && <Check className="w-3 h-3 text-white" />}
+                                        </div>
+                                    )}
+                                </button>
+                            );
+                        })
+                    )}
+                </div>
+
+                {/* Footer — Group create button */}
                 {isGroup && (
-                    <div className="p-6 bg-slate-950/50 border-t border-slate-800">
+                    <div className="px-6 pb-6 pt-2">
                         <button
                             onClick={() => handleCreateChat(groupName, true, selectedUsers.map(u => u.id))}
-                            disabled={creating || selectedUsers.length === 0 || !groupName}
-                            className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-blue-900/20"
+                            disabled={creating || selectedUsers.length === 0 || !groupName.trim()}
+                            className="w-full py-3 rounded-xl text-sm font-semibold text-white bg-indigo-500 hover:bg-indigo-400 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 shadow-[0_0_20px_rgba(99,102,241,0.2)] active:scale-[0.98]"
                         >
-                            {creating ? 'Establishing Connection...' : `CREATE GROUP (${selectedUsers.length})`}
+                            {creating ? (
+                                <span className="flex items-center justify-center gap-2">
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    Creating...
+                                </span>
+                            ) : (
+                                `Create Group · ${selectedUsers.length} member${selectedUsers.length !== 1 ? 's' : ''}`
+                            )}
                         </button>
                     </div>
                 )}

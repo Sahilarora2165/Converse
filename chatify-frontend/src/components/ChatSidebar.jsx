@@ -3,21 +3,17 @@ import { useNavigate, useParams } from "react-router-dom";
 import { getChatRooms } from "../services/api";
 import useAuth from '../hooks/useAuth';
 import useWebSocket from '../hooks/useWebSocket';
+import { MessageSquarePlus, LogOut } from 'lucide-react';
 
 const ChatSidebar = forwardRef(({ rooms, setRooms, onNewChat }, ref) => {
   const navigate = useNavigate();
   const { chatId } = useParams();
   const { user: currentUser, logout } = useAuth();
   const { isConnected, subscribeToRoom, subscribeToPresence } = useWebSocket();
-
   const [activeTab, setActiveTab] = useState('all');
 
-  // ✅ EXPOSE refresh function to parent component
-  useImperativeHandle(ref, () => ({
-    refreshRooms: fetchRooms
-  }));
+  useImperativeHandle(ref, () => ({ refreshRooms: fetchRooms }));
 
-  // ✅ Initial rooms fetch + sort after load
   const fetchRooms = useCallback(async () => {
     try {
       const { data } = await getChatRooms();
@@ -27,264 +23,196 @@ const ChatSidebar = forwardRef(({ rooms, setRooms, onNewChat }, ref) => {
         return new Date(timeB) - new Date(timeA);
       });
       setRooms(sorted);
-    } catch (err) {
-      console.error("Failed to load chat rooms", err);
-    }
+    } catch (err) { console.error("Failed to load chat rooms", err); }
   }, [setRooms]);
 
-  useEffect(() => {
-    fetchRooms();
-  }, [fetchRooms]);
+  useEffect(() => { fetchRooms(); }, [fetchRooms]);
 
-  // ✅ Per-room presence subscriptions
   useEffect(() => {
     if (!isConnected || rooms.length === 0 || !subscribeToPresence) return;
-
     const presenceSubs = rooms.map(room =>
       subscribeToPresence(room.id, (presenceDTO) => {
         setRooms(prevRooms => prevRooms.map(r => {
           if (String(r.id) !== String(room.id)) return r;
-
           const updatedParticipants = r.participants.map(p =>
-            p.id === presenceDTO.userId
-              ? { ...p, status: presenceDTO.status, lastSeen: presenceDTO.lastSeen }
-              : p
+            p.id === presenceDTO.userId ? { ...p, status: presenceDTO.status, lastSeen: presenceDTO.lastSeen } : p
           );
-
           return { ...r, participants: updatedParticipants };
         }));
       })
     );
-
-    return () => {
-      presenceSubs.forEach(sub => sub?.unsubscribe());
-    };
+    return () => presenceSubs.forEach(sub => sub?.unsubscribe());
   }, [isConnected, rooms, subscribeToPresence, setRooms]);
 
-  // ✅ Reset unread count on chat select (optimistic UI)
   useEffect(() => {
     if (!chatId) return;
-    setRooms(prev => prev.map(r =>
-      String(r.id) === String(chatId) ? { ...r, unreadCount: 0 } : r
-    ));
+    setRooms(prev => prev.map(r => String(r.id) === String(chatId) ? { ...r, unreadCount: 0 } : r));
   }, [chatId, setRooms]);
 
+  useEffect(() => {
+    if (!isConnected || !subscribeToRoom || rooms.length === 0) return;
+    const subscriptions = rooms.map(room => subscribeToRoom(room.id, (message) => {
+      const isFromCurrentUser = String(message.senderId) === String(currentUser?.id);
+      const isActiveChat = String(chatId) === String(room.id);
+      setRooms(prev => {
+        const updated = prev.map(r => {
+          if (String(r.id) === String(room.id)) {
+            return {
+              ...r, lastMessage: message.content, lastMessageTimestamp: message.timestamp,
+              lastMessageSenderId: message.senderId, lastMessageSenderName: message.senderName || 'Unknown',
+              unreadCount: (isActiveChat || isFromCurrentUser) ? 0 : (r.unreadCount || 0) + 1
+            };
+          }
+          return r;
+        });
+        return [...updated].sort((a, b) => new Date(b.lastMessageTimestamp || b.createdAt) - new Date(a.lastMessageTimestamp || a.createdAt));
+      });
+    }));
+    return () => subscriptions.forEach(sub => sub?.unsubscribe());
+  }, [isConnected, rooms.length, subscribeToRoom, chatId, currentUser?.id, setRooms]);
 
- useEffect(() => {
-   if (!isConnected || !subscribeToRoom || rooms.length === 0) return;
-
-   const subscriptions = [];
-
-   rooms.forEach(room => {
-     const sub = subscribeToRoom(room.id, (message) => {
-       // ✅ Don't increment if message is from current user
-       const isFromCurrentUser = String(message.senderId) === String(currentUser?.id);
-
-       // ✅ CRITICAL: Don't update if this is the currently active chat
-       const isActiveChat = String(chatId) === String(room.id);
-
-       setRooms(prev => {
-         const updated = prev.map(r => {
-           if (String(r.id) === String(room.id)) {
-             return {
-               ...r,
-               lastMessage: message.content,
-               lastMessageTimestamp: message.timestamp,
-               lastMessageSenderId: message.senderId,
-               lastMessageSenderName: message.senderName || 'Unknown',
-               // ✅ Only increment unread if NOT current chat AND not from current user
-               unreadCount: (isActiveChat || isFromCurrentUser)
-                 ? 0
-                 : (r.unreadCount || 0) + 1
-             };
-           }
-           return r;
-         });
-
-         return [...updated].sort((a, b) => {
-           const timeA = a.lastMessageTimestamp || a.createdAt;
-           const timeB = b.lastMessageTimestamp || b.createdAt;
-           return new Date(timeB) - new Date(timeA);
-         });
-       });
-     });
-     subscriptions.push(sub);
-   });
-
-   return () => {
-     // ✅ Proper cleanup - unsubscribe ALL subscriptions
-     subscriptions.forEach(sub => sub?.unsubscribe());
-   };
- }, [isConnected, rooms.length, subscribeToRoom, chatId, currentUser?.id, setRooms]);
-
-// ✅ Sync unread count after API refresh (NEW - prevents WebSocket overwrite)
-useEffect(() => {
-  if (!rooms.length || !chatId) return;
-
-  // Force sync current chat to 0 unread (matches backend state)
-  setRooms(prev => prev.map(r =>
-    String(r.id) === String(chatId)
-      ? { ...r, unreadCount: 0 }
-      : r
-  ));
-}, [chatId, rooms.length, setRooms]);
-
-  // ✅ Derived sorted + filtered rooms
   const sortedFilteredRooms = useMemo(() => {
-    let filtered = rooms.filter(room => {
+    return rooms.filter(room => {
       if (activeTab === 'group') return room.isGroupChat;
       if (activeTab === 'direct') return !room.isGroupChat;
       return true;
     });
-
-    return [...filtered].sort((a, b) => {
-      const timeA = a.lastMessageTimestamp || a.createdAt;
-      const timeB = b.lastMessageTimestamp || b.createdAt;
-      return new Date(timeB) - new Date(timeA);
-    });
   }, [rooms, activeTab]);
 
+  const tabs = [
+    { key: 'all', label: 'All' },
+    { key: 'direct', label: 'Direct' },
+    { key: 'group', label: 'Groups' },
+  ];
+
   return (
-    <div className="w-80 h-full bg-gradient-to-b from-[#141414] via-[#0f0f0f] to-[#0a0a0a] flex flex-col border-r border-[#2a2a2a] shadow-2xl overflow-hidden">
-      {/* HEADER */}
-      <div className="p-6 bg-gradient-to-r from-[#1a1a1a] to-[#141414] backdrop-blur-xl border-b border-[#2a2a2a]">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[#e8e8e8] to-[#c9a961] tracking-tighter italic">
-            CHATI<span className="text-[#c9a961]">FY</span>
-          </h1>
+    <div className="w-[340px] h-full bg-black flex flex-col border-r border-white/[0.05] relative z-30">
+
+      {/* ── AMBIENT BACKGROUND GLOW ── */}
+      <div className="absolute top-0 left-0 w-full h-40 bg-indigo-500/5 blur-[100px] pointer-events-none" />
+
+      {/* ── HEADER ── */}
+      <div className="px-6 pt-10 pb-6 space-y-6 relative z-10">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-black tracking-tighter text-white uppercase">Terminal</h1>
+            <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mt-1">Communications</p>
+          </div>
           <button
             onClick={onNewChat}
-            className="p-2.5 bg-gradient-to-br from-[#c9a961] via-[#b8955a] to-[#a8865a] hover:shadow-[0_0_20px_rgba(201,169,97,0.4)] text-[#0a0a0a] rounded-xl transition-all shadow-lg active:scale-95"
+            className="p-2.5 rounded-xl bg-zinc-900 border border-white/5 text-zinc-400 hover:text-indigo-400 hover:border-indigo-500/30 transition-all duration-300 active:scale-95"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-            </svg>
+            <MessageSquarePlus className="w-5 h-5" />
           </button>
         </div>
 
-        {/* TAB SYSTEM */}
-        <div className="flex p-1 bg-[#0a0a0a]/60 rounded-xl border border-[#2a2a2a]">
-          {['all', 'direct', 'group'].map((tab) => (
+        {/* Tab Navigation */}
+        <div className="flex p-1 bg-zinc-900/40 rounded-2xl border border-white/[0.03] backdrop-blur-md">
+          {tabs.map((tab) => (
             <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all ${
-                activeTab === tab
-                  ? 'bg-gradient-to-r from-[#c9a961] to-[#a8865a] text-[#0a0a0a] shadow-lg'
-                  : 'text-[#6a6a6a] hover:text-[#c9a961]'
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex-1 py-2 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all duration-300 ${
+                activeTab === tab.key
+                  ? 'bg-zinc-800 text-indigo-400 border border-white/[0.05]'
+                  : 'text-zinc-600 hover:text-zinc-400'
               }`}
             >
-              {tab}
+              {tab.label}
             </button>
           ))}
         </div>
       </div>
 
-      {/* ROOM LIST */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+      {/* ── ROOM LIST ── */}
+      <div className="flex-1 overflow-y-auto px-3 space-y-1 custom-scrollbar relative z-10">
         {sortedFilteredRooms.map((room) => {
-          const otherUser = !room.isGroupChat
-            ? room.participants.find(p => p.id !== currentUser?.id)
-            : null;
-
+          const otherUser = !room.isGroupChat ? room.participants.find(p => p.id !== currentUser?.id) : null;
           const isSelected = String(chatId) === String(room.id);
-
-          let previewText = '';
-          if (room.lastMessage) {
-            if (room.lastMessageSenderId === currentUser?.id) {
-              previewText = `You: ${room.lastMessage}`;
-            } else if (room.isGroupChat) {
-              previewText = `${room.lastMessageSenderName || 'Unknown'}: ${room.lastMessage}`;
-            } else {
-              previewText = room.lastMessage;
-            }
-          } else {
-            previewText = otherUser?.status === 'ONLINE' ? 'Online' : 'Offline';
-          }
+          const isOnline = otherUser?.status === 'ONLINE';
 
           return (
             <div
               key={room.id}
               onClick={() => navigate(`/chat/${room.id}`)}
-              className={`group relative flex items-center gap-4 p-4 rounded-2xl cursor-pointer transition-all border ${
+              className={`group relative flex items-center gap-4 px-4 py-4 rounded-[20px] cursor-pointer transition-all duration-300 ${
                 isSelected
-                  ? 'bg-gradient-to-r from-[#1a1a1a] to-[#141414] border-[#c9a961]/30 shadow-[0_0_20px_rgba(201,169,97,0.1)]'
-                  : 'hover:bg-[#1a1a1a]/40 border-transparent'
+                  ? 'bg-indigo-500/5 border border-indigo-500/20 shadow-lg'
+                  : 'hover:bg-white/[0.02] border border-transparent'
               }`}
             >
-              {/* AVATAR WITH STATUS DOT */}
-              <div className="relative">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#2a2a2a] to-[#1a1a1a] flex items-center justify-center text-[#c9a961] font-bold text-lg border border-[#3a3a3a] shadow-lg group-hover:scale-105 transition-transform overflow-hidden">
+              <div className="relative shrink-0">
+                <div className={`w-11 h-11 rounded-2xl flex items-center justify-center text-xs font-black transition-all duration-300 ${
+                  isSelected
+                    ? 'bg-indigo-500 text-white'
+                    : 'bg-zinc-900 text-zinc-600 group-hover:bg-zinc-800'
+                }`}>
                   {room.isGroupChat ? room.name[0].toUpperCase() : (otherUser?.username?.[0].toUpperCase() || '?')}
                 </div>
-
-                {/* STATUS DOT */}
-                {!room.isGroupChat && otherUser && (
-                  <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-[#0a0a0a] shadow-sm transition-colors duration-500 ${
-                    otherUser.status === 'ONLINE' ? 'bg-[#c9a961] shadow-[0_0_8px_rgba(201,169,97,0.6)]' : 'bg-[#4a4a4a]'
+                {!room.isGroupChat && (
+                  <span className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-[3px] border-black ${
+                    isOnline ? 'bg-indigo-400' : 'bg-zinc-800'
                   }`} />
                 )}
               </div>
 
               <div className="flex-1 min-w-0">
-                <div className="flex justify-between items-baseline mb-1">
-                  <h3 className={`text-sm font-bold truncate transition-colors ${
-                    isSelected ? 'text-[#c9a961]' : 'text-[#e8e8e8]'
-                  }`}>
-                    {room.isGroupChat ? room.name : (otherUser?.username || 'Unknown User')}
-                  </h3>
+                <div className="flex justify-between items-baseline mb-0.5">
+                  <span className={`text-[13px] font-bold truncate ${isSelected ? 'text-white' : 'text-zinc-400 group-hover:text-zinc-200'}`}>
+                    {room.isGroupChat ? room.name : (otherUser?.username || 'User')}
+                  </span>
                   {room.lastMessageTimestamp && (
-                    <span className="text-[10px] text-[#6a6a6a] font-medium">
-                      {new Date(room.lastMessageTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    <span className="text-[9px] text-zinc-700 font-bold uppercase tracking-tighter">
+                      {new Date(room.lastMessageTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-[#6a6a6a] truncate font-medium">
-                  {previewText}
-                </p>
-              </div>
-
-              {room.unreadCount > 0 && (
-                <div className="min-w-[20px] h-5 px-1.5 flex items-center justify-center bg-gradient-to-r from-[#c9a961] to-[#a8865a] text-[#0a0a0a] text-[10px] font-black rounded-full shadow-lg shadow-[#c9a961]/40">
-                  {room.unreadCount}
+                <div className="flex items-center justify-between gap-2">
+                  <p className={`text-[11px] truncate leading-none ${room.unreadCount > 0 ? 'text-indigo-300' : 'text-zinc-600'}`}>
+                    {room.lastMessage || 'Channel empty'}
+                  </p>
+                  {room.unreadCount > 0 && (
+                    <div className="h-4 min-w-[16px] px-1 bg-indigo-500 text-white text-[9px] font-black rounded-md flex items-center justify-center shadow-[0_0_10px_rgba(99,102,241,0.3)]">
+                      {room.unreadCount}
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
           );
         })}
       </div>
 
-      {/* FOOTER */}
-      <div className="p-5 bg-gradient-to-r from-[#1a1a1a] to-[#141414] backdrop-blur-md border-t border-[#2a2a2a]">
-        <div className="flex items-center justify-between p-3 rounded-2xl bg-[#0a0a0a]/60 border border-[#2a2a2a] hover:border-[#c9a961]/30 transition-all group">
-          <div className="flex items-center gap-3">
-            <div className="relative">
-               <div className={`w-3 h-3 rounded-full border-2 border-[#0a0a0a] ${isConnected ? 'bg-[#c9a961] shadow-[0_0_8px_rgba(201,169,97,0.6)]' : 'bg-[#8a4a4a]'}`}></div>
-               {isConnected && <div className="absolute inset-0 bg-[#c9a961] rounded-full animate-ping opacity-75"></div>}
+      {/* ── FOOTER ── */}
+      <div className="p-4 relative mt-auto">
+        <div className="p-4 bg-zinc-900/40 rounded-[24px] border border-white/[0.05] backdrop-blur-xl relative z-10">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-9 h-9 rounded-xl bg-zinc-800 flex items-center justify-center text-white text-[10px] font-black border border-white/5">
+                  {currentUser?.username?.[0]?.toUpperCase() || 'U'}
+                </div>
+                <div className={`absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 border-zinc-900 ${isConnected ? 'bg-indigo-400' : 'bg-red-500'}`} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[12px] font-bold text-white truncate">{currentUser?.username || 'Operator'}</p>
+                <p className="text-[9px] text-zinc-600 font-black uppercase tracking-widest mt-0.5">
+                  {isConnected ? 'Stable' : 'Link Lost'}
+                </p>
+              </div>
             </div>
-            <div className="flex flex-col">
-              <span className="text-sm font-bold text-[#e8e8e8] group-hover:text-[#c9a961] transition-colors">
-                {currentUser?.username || 'User'}
-              </span>
-              <span className="text-[10px] text-[#6a6a6a] uppercase tracking-widest">
-                {isConnected ? 'Connected' : 'Reconnecting...'}
-              </span>
-            </div>
+            <button
+              onClick={logout}
+              className="p-2 text-zinc-500 hover:text-red-400 transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
-
-          <button
-            onClick={logout}
-            className="text-[#6a6a6a] hover:text-[#c9a961] transition-colors p-2 rounded-lg hover:bg-[#1a1a1a]/60"
-            title="Sign Out"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-            </svg>
-          </button>
         </div>
       </div>
     </div>
   );
 });
 
+ChatSidebar.displayName = 'ChatSidebar';
 export default ChatSidebar;

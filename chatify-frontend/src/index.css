@@ -1,13 +1,12 @@
 @import "tailwindcss";
 
-/* v4 configuration: Tell tailwind to look at your React files */
 @source "../src";
 
 @theme {
-  /* You can add custom theme variables here if needed later */
+  /* design tokens if needed later */
 }
 
-/* Base styles to ensure full screen height */
+/* ── Base ── */
 :root, body, #root {
   height: 100%;
   margin: 0;
@@ -15,7 +14,86 @@
 }
 
 body {
-  background-color: #020617; /* slate-950 */
-  color: #f1f5f9;
+  background-color: #000000;
+  color: #f4f4f5;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "cv11", "ss01";
+}
+
+/* ── Smooth scrolling on all scroll containers ── */
+* {
+  scroll-behavior: smooth;
+}
+
+/* ── Custom scrollbar — thin, dark, matches zinc theme ── */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.06) transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 9999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* scrollbar only visible on hover — cinematic clean look */
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  transition: background 0.3s ease;
+}
+
+/* ── Message area scroll — GPU accelerated ── */
+.messages-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.04) transparent;
+  -webkit-overflow-scrolling: touch;
+  will-change: scroll-position;
+  overscroll-behavior-y: contain;
+}
+
+.messages-scroll::-webkit-scrollbar {
+  width: 3px;
+}
+
+.messages-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.messages-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 9999px;
+}
+
+.messages-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* ── Selection color ── */
+::selection {
+  background: rgba(99, 102, 241, 0.3);
+  color: white;
+}
+
+/* ── Focus ring utility ── */
+*:focus-visible {
+  outline: 2px solid rgba(99, 102, 241, 0.4);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* disable focus ring for mouse clicks */
+*:focus:not(:focus-visible) {
+  outline: none;
 }

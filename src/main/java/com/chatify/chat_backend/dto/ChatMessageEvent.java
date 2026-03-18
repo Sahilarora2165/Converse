@@ -5,6 +5,8 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.Instant;
+
 /**
  * Event published to Kafka topic "chat.messages".
  * Contains everything the consumer needs to save the message and broadcast it —
@@ -22,4 +24,10 @@ public class ChatMessageEvent {
     private MessageType messageType;
     private String fileUrl;
     private String fileName;
+
+    /**
+     * Timestamp when the message was sent from the client.
+     * Used for end-to-end latency calculation.
+     */
+    private Instant sentAt;
 }

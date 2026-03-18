@@ -9,6 +9,9 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.messaging.simp.SimpMessageSendingOperations;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
+import java.time.Instant;
+
 @Service
 public class KafkaConsumerService {
 
@@ -16,11 +19,14 @@ public class KafkaConsumerService {
 
     private final MessageService messageService;
     private final SimpMessageSendingOperations messagingTemplate;
+    private final LatencyMetricsService latencyMetricsService;
 
     public KafkaConsumerService(MessageService messageService,
-                                SimpMessageSendingOperations messagingTemplate) {
+                                SimpMessageSendingOperations messagingTemplate,
+                                LatencyMetricsService latencyMetricsService) {
         this.messageService = messageService;
         this.messagingTemplate = messagingTemplate;
+        this.latencyMetricsService = latencyMetricsService;
     }
 
     /**
@@ -46,7 +52,8 @@ public class KafkaConsumerService {
                     event.getContent(),
                     event.getMessageType(),
                     event.getFileUrl(),
-                    event.getFileName()
+                    event.getFileName(),
+                    event.getSentAt()
             );
 
             // Save to DB
@@ -57,6 +64,14 @@ public class KafkaConsumerService {
                     "/topic/chatroom/" + event.getChatRoomId(),
                     savedMessage
             );
+
+            // Calculate and record latency if sentAt timestamp is available
+            if (event.getSentAt() != null) {
+                long latencyMs = Duration.between(event.getSentAt(), Instant.now()).toMillis();
+                latencyMetricsService.recordLatency(latencyMs);
+                log.debug("Message latency: {}ms for room={} messageId={}",
+                        latencyMs, event.getChatRoomId(), savedMessage.getId());
+            }
 
             log.debug("Message saved and broadcast for room={} messageId={}",
                     event.getChatRoomId(), savedMessage.getId());

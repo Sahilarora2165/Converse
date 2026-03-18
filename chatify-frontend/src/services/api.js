@@ -118,4 +118,11 @@ export const sendMessageAPI = (messageData) => api.post('/messages', messageData
 export const getAllUsers = () => api.get('/users');
 export const markMessagesAsRead = (chatId) => api.put(`/messages/chatroom/${chatId}/read-all`);
 
+// Latency Metrics API
+export const getLatencyMetrics = (windowMinutes = 5) => 
+    api.get(`/metrics/latency/current?windowMinutes=${windowMinutes}`);
+export const getLatencyHistory = (windowMinutes = 5) => 
+    api.get(`/metrics/latency/history?windowMinutes=${windowMinutes}`);
+export const getLatencySummary = () => api.get('/metrics/latency/summary');
+
 export default api;

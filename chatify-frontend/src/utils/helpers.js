@@ -20,15 +20,6 @@ export const formatTimestamp = (timestamp) => {
   });
 };
 
-export const formatTime = (timestamp) => {
-  if (!timestamp) return '';
-  const date = new Date(timestamp);
-  return date.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-};
-
 export const getInitials = (name) => {
   if (!name) return '?';
   return name
@@ -55,35 +46,8 @@ export const getOtherParticipant = (chatRoom, currentUserId) => {
   return chatRoom.participants.find((p) => p.id !== currentUserId);
 };
 
-export const isImageFile = (fileType) => {
-  return fileType?.startsWith('image/');
-};
-
 export const truncateText = (text, maxLength = 50) => {
   if (!text) return '';
   if (text.length <= maxLength) return text;
   return text.slice(0, maxLength) + '...';
-};
-
-export const debounce = (func, wait) => {
-  let timeout;
-  return function executedFunction(...args) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
-  };
-};
-
-export const getFileExtension = (filename) => {
-  return filename?.split('.').pop()?.toLowerCase() || '';
-};
-
-export const formatFileSize = (bytes) => {
-  if (!bytes) return '';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };

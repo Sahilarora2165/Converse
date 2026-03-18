@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 
 // Double tick SVG — reused for SENT/DELIVERED/SEEN
 const DoubleTick = ({ color = 'currentColor' }) => (
@@ -179,4 +179,16 @@ const MessageItem = ({
   );
 };
 
-export default MessageItem;
+// Custom comparison function for memo
+const arePropsEqual = (prevProps, nextProps) => {
+  return (
+    prevProps.message.id === nextProps.message.id &&
+    prevProps.message.status === nextProps.message.status &&
+    prevProps.isOwnMessage === nextProps.isOwnMessage &&
+    prevProps.isMe === nextProps.isMe &&
+    prevProps.isFirstInSequence === nextProps.isFirstInSequence &&
+    prevProps.isLastInSequence === nextProps.isLastInSequence
+  );
+};
+
+export default memo(MessageItem, arePropsEqual);

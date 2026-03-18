@@ -151,9 +151,10 @@ export const WebSocketProvider = ({ children }) => {
 
   const sendMessage = useCallback((roomId, content) => {
     if (!clientRef.current?.connected) return;
+    const sentAt = new Date().toISOString();
     clientRef.current.publish({
       destination: `/app/chat/${roomId}/sendMessage`,
-      body: JSON.stringify({ content, chatRoomId: roomId }),
+      body: JSON.stringify({ content, chatRoomId: roomId, sentAt }),
     });
   }, []);
 

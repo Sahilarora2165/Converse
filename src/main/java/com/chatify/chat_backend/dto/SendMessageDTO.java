@@ -6,6 +6,8 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.Instant;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -18,4 +20,10 @@ public class SendMessageDTO {
     private MessageType messageType = MessageType.TEXT;
     private String fileUrl;
     private String fileName;
+
+    /**
+     * Timestamp when the message was sent from the client.
+     * Used for end-to-end latency calculation.
+     */
+    private Instant sentAt;
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import useAuth from "../hooks/useAuth";
 import useWebSocket from "../hooks/useWebSocket";
@@ -7,8 +7,9 @@ import NewChatModal from "../components/NewChatModal";
 import ChatSidebar from "../components/ChatSidebar";
 import MessageItem from "../components/Chat/MessageItem";
 import FileUpload from "../components/Chat/FileUpload";
+import MetricsDashboard from "../components/MetricsDashboard";
 import toast from "react-hot-toast";
-import { Send, X, FileText, MessageCircle, Loader2, Sparkles, ShieldCheck } from "lucide-react";
+import { Send, X, FileText, MessageCircle, Loader2, Sparkles, ShieldCheck, Activity } from "lucide-react";
 import VirtualizedMessageList from "../components/Chat/VirtualizedMessageList";
 
 const FILE_LIMITS = {
@@ -61,6 +62,7 @@ const Chat = () => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [sending, setSending] = useState(false);
+  const [showMetricsDashboard, setShowMetricsDashboard] = useState(false);
 
   const inputRef = useRef(null);
   const subscriptionRef = useRef(null);
@@ -350,7 +352,28 @@ const Chat = () => {
     }
   };
 
-  const groupedMessages = groupMessagesByDate(messages);
+  const groupedMessages = useMemo(() => groupMessagesByDate(messages), [messages]);
+
+  // Memoize the render item callback to prevent unnecessary re-renders
+  const renderItem = useCallback((item) => {
+    if (item.type === "date-separator") {
+      return (
+        <div className="flex justify-center my-5">
+          <div className="px-3 py-1 bg-zinc-900/80 backdrop-blur-sm rounded-md border border-white/[0.04]">
+            <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
+              {formatDateSeparator(item.date)}
+            </span>
+          </div>
+        </div>
+      );
+    }
+    const isMe = String(item.senderId) === String(user?.id);
+    return (
+      <div className="py-1">
+        <MessageItem message={item} isMe={isMe} currentUserId={user?.id} />
+      </div>
+    );
+  }, [user?.id]);
 
   return (
     <div className="flex h-screen bg-zinc-950 font-sans text-zinc-100 overflow-hidden">
@@ -397,6 +420,14 @@ const Chat = () => {
               </div>
 
               <div className="flex items-center gap-4">
+                <button
+                  onClick={() => setShowMetricsDashboard(true)}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:bg-white/[0.05] hover:border-white/[0.1] transition-all"
+                  title="View Latency Metrics"
+                >
+                  <Activity className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">Metrics</span>
+                </button>
                 <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.02] border border-white/[0.05]">
                   <ShieldCheck className="w-3.5 h-3.5 text-zinc-500" />
                 </div>
@@ -429,25 +460,7 @@ const Chat = () => {
                   items={groupedMessages}
                   isLoadingMore={loadingMore}
                   onReachTop={loadOlderMessages}
-                  renderItem={(item) => {
-                    if (item.type === "date-separator") {
-                      return (
-                        <div className="flex justify-center my-5">
-                          <div className="px-3 py-1 bg-zinc-900/80 backdrop-blur-sm rounded-md border border-white/[0.04]">
-                            <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
-                              {formatDateSeparator(item.date)}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    }
-                    const isMe = String(item.senderId) === String(user?.id);
-                    return (
-                      <div className="py-1">
-                        <MessageItem message={item} isMe={isMe} currentUserId={user?.id} />
-                      </div>
-                    );
-                  }}
+                  renderItem={renderItem}
                 />
               )}
 
@@ -548,6 +561,11 @@ const Chat = () => {
       {showNewChatModal && (
         <NewChatModal onClose={() => setShowNewChatModal(false)} onChatCreated={fetchRooms} />
       )}
+      
+      <MetricsDashboard 
+        isOpen={showMetricsDashboard} 
+        onClose={() => setShowMetricsDashboard(false)} 
+      />
     </div>
   );
 };

@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { getChatRooms } from "../services/api";
 import useAuth from '../hooks/useAuth';
 import useWebSocket from '../hooks/useWebSocket';
-import { MessageSquarePlus, LogOut } from 'lucide-react';
+import { MessageSquarePlus, LogOut, MessageCircle } from 'lucide-react';
 
 const ChatSidebar = forwardRef(({ rooms, setRooms, onNewChat }, ref) => {
   const navigate = useNavigate();
@@ -94,9 +94,14 @@ const ChatSidebar = forwardRef(({ rooms, setRooms, onNewChat }, ref) => {
       {/* ── HEADER ── */}
       <div className="px-6 pt-10 pb-6 space-y-6 relative z-10">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-black tracking-tighter text-white uppercase">Terminal</h1>
-            <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mt-1">Communications</p>
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20 border border-indigo-500/20">
+              <MessageCircle className="w-5 h-5 text-indigo-400" />
+            </div>
+            <div>
+              <h1 className="text-xl font-black tracking-tight text-white">Converse</h1>
+              <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mt-0.5">Messages</p>
+            </div>
           </div>
           <button
             onClick={onNewChat}
@@ -195,9 +200,9 @@ const ChatSidebar = forwardRef(({ rooms, setRooms, onNewChat }, ref) => {
                 <div className={`absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 border-zinc-900 ${isConnected ? 'bg-indigo-400' : 'bg-red-500'}`} />
               </div>
               <div className="min-w-0">
-                <p className="text-[12px] font-bold text-white truncate">{currentUser?.username || 'Operator'}</p>
+                <p className="text-[12px] font-bold text-white truncate">{currentUser?.username || 'User'}</p>
                 <p className="text-[9px] text-zinc-600 font-black uppercase tracking-widest mt-0.5">
-                  {isConnected ? 'Stable' : 'Link Lost'}
+                  {isConnected ? 'Online' : 'Offline'}
                 </p>
               </div>
             </div>

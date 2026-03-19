@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import useAuth from '../hooks/useAuth';
 import { loginAPI } from '../services/api';
 import { API_URL } from '../utils/constants';
-import { User, Lock, ArrowRight, Loader2, Sparkles, AlertCircle } from 'lucide-react';
+import { User, Lock, ArrowRight, Loader2, MessageCircle, AlertCircle } from 'lucide-react';
 
 const Login = () => {
     const [email, setEmail] = useState('');
@@ -46,14 +46,17 @@ const Login = () => {
 
                 {/* Header */}
                 <div className="text-center mb-10">
-                    <div className="inline-flex items-center justify-center p-3 mb-6 rounded-2xl bg-white/5 border border-white/10 ring-1 ring-white/5 shadow-2xl backdrop-blur-md">
-                        <Sparkles className="w-6 h-6 text-indigo-400" />
+                    <div className="inline-flex items-center justify-center p-3 mb-6 rounded-2xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20 border border-indigo-500/20 ring-1 ring-white/5 shadow-2xl backdrop-blur-md">
+                        <MessageCircle className="w-8 h-8 text-indigo-400" />
                     </div>
-                    <h2 className="text-3xl font-medium tracking-tight text-white mb-2">
+                    <h1 className="text-4xl font-black tracking-tight text-white mb-2">
+                        Converse
+                    </h1>
+                    <h2 className="text-xl font-medium tracking-tight text-zinc-300 mb-2">
                         Welcome Back
                     </h2>
                     <p className="text-zinc-400 text-sm">
-                        Enter your credentials to access your terminal.
+                        Sign in to continue your conversations.
                     </p>
                 </div>
 

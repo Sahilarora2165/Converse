@@ -413,8 +413,8 @@ const Chat = () => {
                     {currentRoom.isGroupChat
                       ? `${currentRoom.participants?.length} Members`
                       : isOtherUserOnline
-                      ? "Connection Live"
-                      : `Offline • ${formatRelativeTime(otherUser?.lastSeen)}`}
+                      ? "Online"
+                      : `Last seen ${formatRelativeTime(otherUser?.lastSeen)}`}
                   </p>
                 </div>
               </div>
@@ -542,17 +542,17 @@ const Chat = () => {
           // empty state
           <div className="flex-1 flex flex-col items-center justify-center p-12 text-center opacity-40">
             <div className="w-24 h-24 mb-8 rounded-[40px] bg-zinc-900 border border-white/5 flex items-center justify-center">
-              <Sparkles className="w-10 h-10 text-zinc-700" />
+              <MessageCircle className="w-10 h-10 text-zinc-700" />
             </div>
-            <h3 className="text-xl font-black uppercase tracking-[0.2em] text-white">Encrypted Terminal</h3>
+            <h3 className="text-xl font-black uppercase tracking-[0.2em] text-white">Converse</h3>
             <p className="text-sm text-zinc-500 mt-4 max-w-xs leading-relaxed">
-              Select a secure communication channel from the sidebar or initiate a new handshake.
+              Select a conversation from the sidebar or start a new chat to begin messaging.
             </p>
             <button
               onClick={() => setShowNewChatModal(true)}
               className="mt-8 px-8 py-3 rounded-2xl bg-white text-black text-xs font-black uppercase tracking-widest hover:bg-zinc-200 transition-all active:scale-95"
             >
-              New Handshake
+              New Chat
             </button>
           </div>
         )}

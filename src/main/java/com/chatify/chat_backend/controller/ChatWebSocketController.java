@@ -10,6 +10,8 @@ import com.chatify.chat_backend.service.PresenceService;
 import com.chatify.chat_backend.service.UserService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
@@ -22,6 +24,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * WebSocket Controller with PERSISTENCE-FIRST ARCHITECTURE.
@@ -52,6 +55,14 @@ public class ChatWebSocketController {
     private final KafkaProducerService kafkaProducerService;
     private final LatencyMetricsService latencyMetricsService;
 
+    @Autowired
+    @Qualifier("dbExecutor")
+    private Executor dbExecutor;
+
+    @Autowired
+    @Qualifier("wsExecutor")
+    private Executor wsExecutor;
+
     public ChatWebSocketController(SimpMessageSendingOperations messagingTemplate,
                                    MessageService messageService,
                                    UserService userService,
@@ -71,13 +82,16 @@ public class ChatWebSocketController {
     /**
      * Primary handler used by the frontend (WebSocketContext.jsx).
      *
-     * PERSISTENCE-FIRST ARCHITECTURE:
+     * PERSISTENCE-FIRST ARCHITECTURE with THREAD POOL ISOLATION:
      * 1. Validate and authenticate
-     * 2. PERSIST to database synchronously (ensures durability)
-     * 3. BROADCAST via WebSocket with real DB ID
+     * 2. PERSIST to database asynchronously on dbExecutor (ensures durability)
+     * 3. BROADCAST via WebSocket asynchronously on wsExecutor with real DB ID
      * 4. ASYNC publish to Kafka (optional reliability path)
      *
-     * This ensures messages are never lost even if Kafka is unavailable.
+     * This ensures:
+     * - Messages are never lost even if Kafka is unavailable
+     * - DB slowness never blocks WebSocket delivery
+     * - Each concern runs on its own isolated thread pool
      */
     @MessageMapping("/chat/{roomId}/sendMessage")
     public void sendMessage(
@@ -108,43 +122,49 @@ public class ChatWebSocketController {
             latencyMetricsService.recordLatency(latencyMs);
         }
 
-        // 3. PERSIST TO DATABASE FIRST - This ensures messages are never lost
-        MessageDTO savedMessage = messageService.sendMessage(sendMessageDTO, user.getId());
+        // 3. PERSIST TO DATABASE FIRST on dbExecutor - This ensures messages are never lost
+        // 4. BROADCAST on wsExecutor - DB slowness never blocks WebSocket delivery
+        CompletableFuture.supplyAsync(() -> messageService.sendMessage(sendMessageDTO, user.getId()), dbExecutor)
+                .thenAcceptAsync(savedMessage -> {
+                    // Broadcast with real DB ID - All clients receive the persisted message
+                    messagingTemplate.convertAndSend("/topic/chatroom/" + roomId, savedMessage);
 
-        // 4. BROADCAST with real DB ID - All clients receive the persisted message
-        messagingTemplate.convertAndSend("/topic/chatroom/" + roomId, savedMessage);
+                    long elapsedMs = (System.nanoTime() - startTime) / 1_000_000;
+                    log.debug("Message {} persisted and broadcast in {}ms for room={}", savedMessage.getId(), elapsedMs, roomId);
 
-        // 5. ASYNC KAFKA PUBLISH - Optional reliability path for analytics/replay
-        CompletableFuture.runAsync(() -> {
-            try {
-                ChatMessageEvent event = ChatMessageEvent.builder()
-                        .messageId(savedMessage.getId().toString())
-                        .chatRoomId(roomId)
-                        .senderId(user.getId())
-                        .senderUsername(user.getUsername())
-                        .content(sendMessageDTO.getContent())
-                        .messageType(sendMessageDTO.getMessageType())
-                        .fileUrl(sendMessageDTO.getFileUrl())
-                        .fileName(sendMessageDTO.getFileName())
-                        .sentAt(sendMessageDTO.getSentAt())
-                        .serverReceivedAt(serverReceivedAt)
-                        .replyToMessageId(sendMessageDTO.getReplyToMessageId())
-                        .retryCount(0)
-                        .build();
-                kafkaProducerService.publishChatMessage(event);
-            } catch (Exception e) {
-                log.debug("Kafka publish skipped for message {} (Kafka may be unavailable): {}",
-                        savedMessage.getId(), e.getMessage());
-                // Message already persisted and delivered - Kafka is optional
-            }
-        });
-
-        long elapsedMs = (System.nanoTime() - startTime) / 1_000_000;
-        log.debug("Message {} persisted and broadcast in {}ms for room={}", savedMessage.getId(), elapsedMs, roomId);
+                    // 5. ASYNC KAFKA PUBLISH - Optional reliability path for analytics/replay
+                    CompletableFuture.runAsync(() -> {
+                        try {
+                            ChatMessageEvent event = ChatMessageEvent.builder()
+                                    .messageId(savedMessage.getId().toString())
+                                    .chatRoomId(roomId)
+                                    .senderId(user.getId())
+                                    .senderUsername(user.getUsername())
+                                    .content(sendMessageDTO.getContent())
+                                    .messageType(sendMessageDTO.getMessageType())
+                                    .fileUrl(sendMessageDTO.getFileUrl())
+                                    .fileName(sendMessageDTO.getFileName())
+                                    .sentAt(sendMessageDTO.getSentAt())
+                                    .serverReceivedAt(serverReceivedAt)
+                                    .replyToMessageId(sendMessageDTO.getReplyToMessageId())
+                                    .retryCount(0)
+                                    .build();
+                            kafkaProducerService.publishChatMessage(event);
+                        } catch (Exception e) {
+                            log.debug("Kafka publish skipped for message {} (Kafka may be unavailable): {}",
+                                    savedMessage.getId(), e.getMessage());
+                            // Message already persisted and delivered - Kafka is optional
+                        }
+                    });
+                }, wsExecutor)
+                .exceptionally(ex -> {
+                    log.error("Failed to process message for room {}: {}", roomId, ex.getMessage(), ex);
+                    return null;
+                });
     }
 
     /**
-     * Legacy handler - uses persistence-first architecture.
+     * Legacy handler - uses persistence-first architecture with thread pool isolation.
      */
     @MessageMapping("/chat.sendMessage")
     public void sendMessage(@Payload SendMessageDTO messageDTO, Principal principal) {
@@ -165,35 +185,41 @@ public class ChatWebSocketController {
             latencyMetricsService.recordLatency(latencyMs);
         }
 
-        // Persist to database first
-        MessageDTO savedMessage = messageService.sendMessage(messageDTO, sender.getId());
-
-        // Broadcast with real DB ID
-        messagingTemplate.convertAndSend("/topic/chatroom/" + messageDTO.getChatRoomId(), savedMessage);
-
-        // Async Kafka publish (optional)
         Long roomId = messageDTO.getChatRoomId();
-        CompletableFuture.runAsync(() -> {
-            try {
-                ChatMessageEvent event = ChatMessageEvent.builder()
-                        .messageId(savedMessage.getId().toString())
-                        .chatRoomId(roomId)
-                        .senderId(sender.getId())
-                        .senderUsername(sender.getUsername())
-                        .content(messageDTO.getContent())
-                        .messageType(messageDTO.getMessageType())
-                        .fileUrl(messageDTO.getFileUrl())
-                        .fileName(messageDTO.getFileName())
-                        .sentAt(messageDTO.getSentAt())
-                        .serverReceivedAt(serverReceivedAt)
-                        .replyToMessageId(messageDTO.getReplyToMessageId())
-                        .retryCount(0)
-                        .build();
-                kafkaProducerService.publishChatMessage(event);
-            } catch (Exception e) {
-                log.debug("Kafka publish skipped (Kafka may be unavailable): {}", e.getMessage());
-            }
-        });
+
+        // Persist to database on dbExecutor, then broadcast on wsExecutor
+        CompletableFuture.supplyAsync(() -> messageService.sendMessage(messageDTO, sender.getId()), dbExecutor)
+                .thenAcceptAsync(savedMessage -> {
+                    // Broadcast with real DB ID
+                    messagingTemplate.convertAndSend("/topic/chatroom/" + roomId, savedMessage);
+
+                    // Async Kafka publish (optional)
+                    CompletableFuture.runAsync(() -> {
+                        try {
+                            ChatMessageEvent event = ChatMessageEvent.builder()
+                                    .messageId(savedMessage.getId().toString())
+                                    .chatRoomId(roomId)
+                                    .senderId(sender.getId())
+                                    .senderUsername(sender.getUsername())
+                                    .content(messageDTO.getContent())
+                                    .messageType(messageDTO.getMessageType())
+                                    .fileUrl(messageDTO.getFileUrl())
+                                    .fileName(messageDTO.getFileName())
+                                    .sentAt(messageDTO.getSentAt())
+                                    .serverReceivedAt(serverReceivedAt)
+                                    .replyToMessageId(messageDTO.getReplyToMessageId())
+                                    .retryCount(0)
+                                    .build();
+                            kafkaProducerService.publishChatMessage(event);
+                        } catch (Exception e) {
+                            log.debug("Kafka publish skipped (Kafka may be unavailable): {}", e.getMessage());
+                        }
+                    });
+                }, wsExecutor)
+                .exceptionally(ex -> {
+                    log.error("Failed to process legacy message for room {}: {}", roomId, ex.getMessage(), ex);
+                    return null;
+                });
     }
 
     @MessageMapping("/chat.edit")

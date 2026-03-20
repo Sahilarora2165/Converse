@@ -1,0 +1,128 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Chatify Real-Time Metrics",
+    "tags": ["chatify", "real-time", "chat"],
+    "timezone": "browser",
+    "schemaVersion": 36,
+    "refresh": "5s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Message Latency (P50/P95/P99)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, sum(rate(chatify_message_latency_seconds_bucket[5m])) by (le))",
+            "legendFormat": "P50",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(chatify_message_latency_seconds_bucket[5m])) by (le))",
+            "legendFormat": "P95",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, sum(rate(chatify_message_latency_seconds_bucket[5m])) by (le))",
+            "legendFormat": "P99",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ms",
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 50},
+                {"color": "red", "value": 100}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Messages Per Second",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(chatify_messages_sent_total[1m])",
+            "legendFormat": "Messages/sec",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Active WebSocket Connections",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "chatify_websocket_connections_active",
+            "legendFormat": "Connections",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 8}
+      },
+      {
+        "id": 4,
+        "title": "Thread Pool Usage",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "chatify_thread_pool_active_threads{name=\"dbExecutor\"}",
+            "legendFormat": "DB Threads",
+            "refId": "A"
+          },
+          {
+            "expr": "chatify_thread_pool_active_threads{name=\"wsExecutor\"}",
+            "legendFormat": "WS Threads",
+            "refId": "B"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 8}
+      },
+      {
+        "id": 5,
+        "title": "Message Delivery Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "(chatify_messages_delivered_total / chatify_messages_sent_total) * 100",
+            "legendFormat": "Delivery %",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100
+          }
+        },
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 8}
+      },
+      {
+        "id": 6,
+        "title": "HTTP Request Latency",
+        "type": "heatmap",
+        "targets": [
+          {
+            "expr": "sum(rate(http_server_requests_seconds_bucket[5m])) by (le)",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 10, "w": 24, "x": 0, "y": 16}
+      }
+    ]
+  }
+}

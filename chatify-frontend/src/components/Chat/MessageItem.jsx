@@ -289,10 +289,37 @@ const MessageItem = ({
               own ? 'text-emerald-200/70' : 'text-gray-500'
             }`}
           >
-            {new Date(message.timestamp).toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-            })}
+            {(() => {
+              // Handle both ISO string and array format [year, month, day, hour, minute, second, nanosecond]
+              let timestamp = message.timestamp;
+              let date;
+              
+              if (Array.isArray(timestamp)) {
+                // Array format from backend: [year, month, day, hour, minute, second, nanosecond]
+                // This is sent as UTC time from the server
+                const [year, month, day, hour, minute, second] = timestamp;
+                // Create date in UTC by appending 'Z' to ISO string
+                const isoString = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second || 0).padStart(2, '0')}Z`;
+                date = new Date(isoString);
+              } else if (typeof timestamp === 'string') {
+                // ISO string format - may or may not have 'Z' suffix
+                date = new Date(timestamp.includes('Z') || timestamp.includes('+') || timestamp.includes('-') && timestamp.lastIndexOf('-') > 10 ? timestamp : timestamp + 'Z');
+              } else {
+                // Fallback for number or Date object
+                date = new Date(timestamp);
+              }
+              
+              // Check if date is valid
+              if (isNaN(date.getTime())) {
+                return '--:--';
+              }
+              
+              // Convert to local timezone for display
+              return date.toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+              });
+            })()}
           </span>
           {own && (
             <span className={`${message.status === 'SEEN' ? 'text-emerald-300' : 'text-gray-400'}`}>

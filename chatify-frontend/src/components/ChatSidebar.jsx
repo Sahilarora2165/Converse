@@ -73,11 +73,20 @@ const ChatSidebar = forwardRef(({ rooms, setRooms, onNewChat }, ref) => {
 
   const sortedFilteredRooms = useMemo(() => {
     return rooms.filter(room => {
+      // Filter out rooms with no participants (empty channels)
+      if (!room.participants || room.participants.length === 0) return false;
+      
+      // Filter out rooms where current user is the only participant and no messages
+      const hasOtherParticipants = room.participants.some(p => p.id !== currentUser?.id);
+      const hasMessages = room.lastMessage || room.lastMessageTimestamp;
+      if (!room.isGroupChat && !hasOtherParticipants && !hasMessages) return false;
+      
+      // Apply tab filter
       if (activeTab === 'group') return room.isGroupChat;
       if (activeTab === 'direct') return !room.isGroupChat;
       return true;
     });
-  }, [rooms, activeTab]);
+  }, [rooms, activeTab, currentUser?.id]);
 
   const tabs = [
     { key: 'all', label: 'All' },
@@ -173,7 +182,34 @@ const ChatSidebar = forwardRef(({ rooms, setRooms, onNewChat }, ref) => {
                   </div>
                   {room.lastMessageTimestamp && (
                     <span className="text-[9px] text-zinc-700 font-bold uppercase tracking-tighter">
-                      {new Date(room.lastMessageTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
+                      {(() => {
+                        // Handle both ISO string and array format [year, month, day, hour, minute, second, nanosecond]
+                        let timestamp = room.lastMessageTimestamp;
+                        let date;
+                        
+                        if (Array.isArray(timestamp)) {
+                          // Array format from backend: [year, month, day, hour, minute, second, nanosecond]
+                          // This is sent as UTC time from the server
+                          const [year, month, day, hour, minute, second] = timestamp;
+                          // Create date in UTC by appending 'Z' to ISO string
+                          const isoString = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second || 0).padStart(2, '0')}Z`;
+                          date = new Date(isoString);
+                        } else if (typeof timestamp === 'string') {
+                          // ISO string format - may or may not have 'Z' suffix
+                          date = new Date(timestamp.includes('Z') || timestamp.includes('+') || timestamp.includes('-') && timestamp.lastIndexOf('-') > 10 ? timestamp : timestamp + 'Z');
+                        } else {
+                          // Fallback for number or Date object
+                          date = new Date(timestamp);
+                        }
+                        
+                        // Check if date is valid
+                        if (isNaN(date.getTime())) {
+                          return '--:--';
+                        }
+                        
+                        // Convert to local timezone for display
+                        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+                      })()}
                     </span>
                   )}
                 </div>

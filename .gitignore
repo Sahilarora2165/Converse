@@ -62,3 +62,27 @@ chatify-frontend/.env.local
 
 # Upload directory
 uploads/
+
+# Monitoring data (generated at runtime)
+monitoring/grafana/data/
+monitoring/prometheus/data/
+
+# Load testing virtual environment
+load_testing/venv/
+load_testing/__pycache__/
+load_testing/*.pyc
+
+# Qoder IDE files
+.qoder/
+
+# Docker volumes (runtime data)
+postgres_data/
+redis_data/
+zookeeper_data/
+zookeeper_log/
+kafka_data/
+prometheus_data/
+grafana_data/
+
+# Old load test file (replaced by load_testing/)
+load_test.py

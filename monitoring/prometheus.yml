@@ -14,5 +14,5 @@ scrape_configs:
   - job_name: 'chatify-backend'
     metrics_path: '/actuator/prometheus'
     static_configs:
-      - targets: ['host.docker.internal:8080']
+      - targets: ['app:8080']
     scrape_interval: 5s

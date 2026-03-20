@@ -1,4 +1,4 @@
-# ========== Spring Boot / Java ==========
+i # ========== Spring Boot / Java ==========
 # Compiled class files
 *.class
 
@@ -86,3 +86,11 @@ grafana_data/
 
 # Old load test file (replaced by load_testing/)
 load_test.py
+
+# Personal/Development documentation (not for GitHub)
+HELP.md
+IMPLEMENTATION_PROMPTS.md
+MESSAGE_DELIVERY_DESIGN.md
+POSTMAN_API_DOCUMENTATION.md
+
+# Keep only README.md for public documentation

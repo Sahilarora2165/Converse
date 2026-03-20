@@ -53,6 +53,8 @@ public class ChatMessageEvent {
      */
     private Instant serverReceivedAt;
 
+    private Long replyToMessageId;
+
     /**
      * Retry count for failed processing attempts.
      */

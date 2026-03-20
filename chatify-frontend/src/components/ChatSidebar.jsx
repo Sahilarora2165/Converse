@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { getChatRooms } from "../services/api";
 import useAuth from '../hooks/useAuth';
 import useWebSocket from '../hooks/useWebSocket';
-import { MessageSquarePlus, LogOut, MessageCircle } from 'lucide-react';
+import { MessageSquarePlus, LogOut, MessageCircle, Crown } from 'lucide-react';
 
 const ChatSidebar = forwardRef(({ rooms, setRooms, onNewChat }, ref) => {
   const navigate = useNavigate();
@@ -163,9 +163,14 @@ const ChatSidebar = forwardRef(({ rooms, setRooms, onNewChat }, ref) => {
 
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-baseline mb-0.5">
-                  <span className={`text-[13px] font-bold truncate ${isSelected ? 'text-white' : 'text-zinc-400 group-hover:text-zinc-200'}`}>
-                    {room.isGroupChat ? room.name : (otherUser?.username || 'User')}
-                  </span>
+                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                    <span className={`text-[13px] font-bold truncate ${isSelected ? 'text-white' : 'text-zinc-400 group-hover:text-zinc-200'}`}>
+                      {room.isGroupChat ? room.name : (otherUser?.username || 'User')}
+                    </span>
+                    {room.isGroupChat && room.admin?.id === currentUser?.id && (
+                      <Crown className="w-3 h-3 text-amber-400 flex-shrink-0" />
+                    )}
+                  </div>
                   {room.lastMessageTimestamp && (
                     <span className="text-[9px] text-zinc-700 font-bold uppercase tracking-tighter">
                       {new Date(room.lastMessageTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}

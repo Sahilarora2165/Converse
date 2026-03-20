@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import useAuth from "../hooks/useAuth";
 import useWebSocket from "../hooks/useWebSocket";
@@ -8,8 +8,12 @@ import ChatSidebar from "../components/ChatSidebar";
 import MessageItem from "../components/Chat/MessageItem";
 import FileUpload from "../components/Chat/FileUpload";
 import MetricsDashboard from "../components/MetricsDashboard";
+import SearchModal from "../components/SearchModal";
+import ProfileModal from "../components/ProfileModal";
+import UserProfileModal from "../components/UserProfileModal";
+import GroupInfoModal from "../components/GroupInfoModal";
 import toast from "react-hot-toast";
-import { Send, X, FileText, MessageCircle, Loader2, Sparkles, ShieldCheck, Activity } from "lucide-react";
+import { Send, X, FileText, MessageCircle, Loader2, Sparkles, ShieldCheck, Activity, Search, User, Users, Reply } from "lucide-react";
 import VirtualizedMessageList from "../components/Chat/VirtualizedMessageList";
 
 const FILE_LIMITS = {
@@ -40,6 +44,11 @@ const Chat = () => {
     isConnected,
     subscribeToDelivery,
     subscribeToSeen,
+    subscribeToEdits,
+    subscribeToDeletes,
+    subscribeToGroupUpdates,
+    sendEdit,
+    sendDelete,
     sendDeliveryAck,
     sendSeenAck,
   } = useWebSocket();
@@ -64,10 +73,22 @@ const Chat = () => {
   const [sending, setSending] = useState(false);
   const [showMetricsDashboard, setShowMetricsDashboard] = useState(false);
 
+  // Reply state
+  const [replyingTo, setReplyingTo] = useState(null);
+
+  // Modal states
+  const [showSearchModal, setShowSearchModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showUserProfileModal, setShowUserProfileModal] = useState(null); // userId
+  const [showGroupInfoModal, setShowGroupInfoModal] = useState(false);
+
   const inputRef = useRef(null);
   const subscriptionRef = useRef(null);
   const deliverySubRef = useRef(null);
   const seenSubRef = useRef(null);
+  const editSubRef = useRef(null);
+  const deleteSubRef = useRef(null);
+  const groupUpdateSubRef = useRef(null);
   const isChatActiveRef = useRef(false);
   const isLoadingRef = useRef(false);
   const previousChatIdRef = useRef(null);
@@ -133,14 +154,13 @@ const Chat = () => {
     return grouped;
   };
 
-  // pagination fetch, triggered by VirtualizedMessageList when near top
   const loadOlderMessages = useCallback(async () => {
     if (!chatId || !hasMore || loadingMore) return;
 
     setLoadingMore(true);
     try {
       const { data: pageData } = await getChatHistoryPaginated(chatId, page, PAGE_SIZE);
-      const olderMsgs = (pageData.content || []).reverse(); // backend: newest-first
+      const olderMsgs = (pageData.content || []).reverse();
 
       if (olderMsgs.length > 0) {
         setMessages((prev) => {
@@ -198,6 +218,7 @@ const Chat = () => {
 
       setPage(0);
       setHasMore(true);
+      setReplyingTo(null);
 
       try {
         const { data: pageData } = await getChatHistoryPaginated(chatId, 0, PAGE_SIZE);
@@ -210,7 +231,6 @@ const Chat = () => {
         await markMessagesAsRead(chatId);
         await fetchRooms();
 
-        // ACK delivered for latest other-user message
         if (msgs.length > 0 && sendDeliveryAck) {
           const others = msgs.filter((m) => m.senderId !== user?.id);
           if (others.length > 0) {
@@ -260,6 +280,42 @@ const Chat = () => {
             );
           });
         }
+
+        // edit updates
+        editSubRef.current?.unsubscribe();
+        if (subscribeToEdits) {
+          editSubRef.current = subscribeToEdits(chatId, (editedMsg) => {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === editedMsg.id
+                  ? { ...msg, content: editedMsg.content, edited: true, editedAt: editedMsg.editedAt }
+                  : msg
+              )
+            );
+          });
+        }
+
+        // delete updates
+        deleteSubRef.current?.unsubscribe();
+        if (subscribeToDeletes) {
+          deleteSubRef.current = subscribeToDeletes(chatId, (deletedMsg) => {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === deletedMsg.id
+                  ? { ...msg, content: deletedMsg.content, deleted: true, fileUrl: null, fileName: null }
+                  : msg
+              )
+            );
+          });
+        }
+
+        // group updates
+        groupUpdateSubRef.current?.unsubscribe();
+        if (subscribeToGroupUpdates) {
+          groupUpdateSubRef.current = subscribeToGroupUpdates(chatId, () => {
+            fetchRooms();
+          });
+        }
       } catch (err) {
         console.error(err);
         toast.error("History failed");
@@ -275,6 +331,9 @@ const Chat = () => {
       subscriptionRef.current?.unsubscribe();
       deliverySubRef.current?.unsubscribe();
       seenSubRef.current?.unsubscribe();
+      editSubRef.current?.unsubscribe();
+      deleteSubRef.current?.unsubscribe();
+      groupUpdateSubRef.current?.unsubscribe();
     };
   }, [
     chatId,
@@ -282,6 +341,9 @@ const Chat = () => {
     subscribeToRoom,
     subscribeToDelivery,
     subscribeToSeen,
+    subscribeToEdits,
+    subscribeToDeletes,
+    subscribeToGroupUpdates,
     sendDeliveryAck,
     sendSeenAck,
     user?.id,
@@ -334,15 +396,17 @@ const Chat = () => {
           messageType: getMessageType(selectedFile.type),
           fileUrl: presignedData.fileUrl,
           fileName: selectedFile.name,
+          replyToMessageId: replyingTo?.id || null,
         });
 
         setSelectedFile(null);
         setPreviewUrl(null);
       } else {
-        sendMessage(chatId, newMessage.trim());
+        sendMessage(chatId, newMessage.trim(), replyingTo?.id || null);
       }
 
       setNewMessage("");
+      setReplyingTo(null);
       inputRef.current?.focus();
     } catch (err) {
       console.error(err);
@@ -352,9 +416,34 @@ const Chat = () => {
     }
   };
 
+  const handleReply = useCallback((message) => {
+    setReplyingTo(message);
+    inputRef.current?.focus();
+  }, []);
+
+  const handleEdit = useCallback((messageId, newContent) => {
+    if (sendEdit) {
+      sendEdit(messageId, newContent);
+    }
+  }, [sendEdit]);
+
+  const handleDelete = useCallback((messageId) => {
+    if (sendDelete) {
+      sendDelete(messageId);
+    }
+  }, [sendDelete]);
+
+  const handleScrollToMessage = useCallback((messageId) => {
+    const el = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("bg-amber-500/10");
+      setTimeout(() => el.classList.remove("bg-amber-500/10"), 2000);
+    }
+  }, []);
+
   const groupedMessages = useMemo(() => groupMessagesByDate(messages), [messages]);
 
-  // Memoize the render item callback to prevent unnecessary re-renders
   const renderItem = useCallback((item) => {
     if (item.type === "date-separator") {
       return (
@@ -370,10 +459,18 @@ const Chat = () => {
     const isMe = String(item.senderId) === String(user?.id);
     return (
       <div className="py-1">
-        <MessageItem message={item} isMe={isMe} currentUserId={user?.id} />
+        <MessageItem
+          message={item}
+          isMe={isMe}
+          currentUserId={user?.id}
+          onReply={handleReply}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
+          onScrollToMessage={handleScrollToMessage}
+        />
       </div>
     );
-  }, [user?.id]);
+  }, [user?.id, handleReply, handleEdit, handleDelete, handleScrollToMessage]);
 
   return (
     <div className="flex h-screen bg-zinc-950 font-sans text-zinc-100 overflow-hidden">
@@ -388,7 +485,16 @@ const Chat = () => {
           <>
             {/* Header */}
             <header className="relative z-20 px-8 py-5 border-b border-white/[0.03] bg-zinc-950/40 backdrop-blur-2xl flex items-center justify-between">
-              <div className="flex items-center gap-5">
+              <div
+                className="flex items-center gap-5 cursor-pointer"
+                onClick={() => {
+                  if (currentRoom.isGroupChat) {
+                    setShowGroupInfoModal(true);
+                  } else if (otherUser) {
+                    setShowUserProfileModal(otherUser.id);
+                  }
+                }}
+              >
                 <div className="relative group">
                   <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-zinc-800 to-zinc-900 border border-white/10 flex items-center justify-center text-zinc-100 font-bold shadow-2xl transition-transform group-hover:scale-105">
                     {currentRoom.isGroupChat ? currentRoom.name[0] : otherUser?.username?.[0] || "?"}
@@ -419,14 +525,31 @@ const Chat = () => {
                 </div>
               </div>
 
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowSearchModal(true)}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:bg-white/[0.05] hover:border-white/[0.1] transition-all"
+                  title="Search Messages"
+                >
+                  <Search className="w-3.5 h-3.5 text-zinc-400" />
+                  <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider hidden md:inline">Search</span>
+                </button>
+                {currentRoom.isGroupChat && (
+                  <button
+                    onClick={() => setShowGroupInfoModal(true)}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:bg-white/[0.05] hover:border-white/[0.1] transition-all"
+                    title="Group Info"
+                  >
+                    <Users className="w-3.5 h-3.5 text-zinc-400" />
+                  </button>
+                )}
                 <button
                   onClick={() => setShowMetricsDashboard(true)}
                   className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:bg-white/[0.05] hover:border-white/[0.1] transition-all"
                   title="View Latency Metrics"
                 >
                   <Activity className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">Metrics</span>
+                  <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider hidden md:inline">Metrics</span>
                 </button>
                 <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.02] border border-white/[0.05]">
                   <ShieldCheck className="w-3.5 h-3.5 text-zinc-500" />
@@ -467,15 +590,36 @@ const Chat = () => {
               {loadingMore && (
                 <div className="absolute left-1/2 -translate-x-1/2 top-[72px] px-3 py-1 rounded-full bg-zinc-900 border border-white/[0.06] text-[10px] text-zinc-400 flex items-center gap-2">
                   <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin" />
-                  Loading older…
+                  Loading older...
                 </div>
               )}
             </div>
 
             {/* Footer / Input */}
             <footer className="relative z-20 px-8 pb-8 pt-2">
+              {/* Reply preview */}
+              {replyingTo && (
+                <div className="mb-0 mx-4 p-3 bg-zinc-900/90 backdrop-blur-md rounded-t-2xl border border-white/5 border-b-0 flex items-center gap-3">
+                  <div className="w-1 h-10 bg-amber-500 rounded-full flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">
+                      Replying to {replyingTo.senderUsername}
+                    </p>
+                    <p className="text-xs text-zinc-400 truncate mt-0.5">
+                      {replyingTo.deleted ? "This message was deleted" : replyingTo.content}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setReplyingTo(null)}
+                    className="p-1 hover:bg-white/10 rounded-lg transition-colors"
+                  >
+                    <X className="w-4 h-4 text-zinc-500" />
+                  </button>
+                </div>
+              )}
+
               {selectedFile && (
-                <div className="mb-0 mx-4 p-4 bg-zinc-900/90 backdrop-blur-md rounded-t-3xl border border-white/5 border-b-0 flex items-center gap-4 animate-in slide-in-from-bottom-2">
+                <div className={`mb-0 mx-4 p-4 bg-zinc-900/90 backdrop-blur-md ${replyingTo ? 'border-t-0' : 'rounded-t-3xl'} border border-white/5 border-b-0 flex items-center gap-4 animate-in slide-in-from-bottom-2`}>
                   <div className="relative h-14 w-14 group">
                     {previewUrl ? (
                       <img
@@ -508,7 +652,7 @@ const Chat = () => {
               <form
                 onSubmit={handleSendMessage}
                 className={`flex items-center gap-3 p-2 bg-zinc-900/50 backdrop-blur-xl border border-white/5 shadow-2xl transition-all ${
-                  selectedFile ? "rounded-b-3xl rounded-t-none" : "rounded-[28px]"
+                  selectedFile || replyingTo ? "rounded-b-3xl rounded-t-none" : "rounded-[28px]"
                 }`}
               >
                 <div className="flex-shrink-0 ml-1">
@@ -520,7 +664,7 @@ const Chat = () => {
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
                   disabled={!isConnected || sending}
-                  placeholder={selectedFile ? "Add details to this file..." : "Express yourself..."}
+                  placeholder={selectedFile ? "Add details to this file..." : replyingTo ? "Type your reply..." : "Express yourself..."}
                   className="flex-1 bg-transparent px-2 py-3.5 text-sm text-white placeholder-zinc-600 focus:outline-none"
                 />
 
@@ -566,6 +710,39 @@ const Chat = () => {
         isOpen={showMetricsDashboard} 
         onClose={() => setShowMetricsDashboard(false)} 
       />
+
+      {showSearchModal && chatId && (
+        <SearchModal
+          chatRoomId={chatId}
+          onClose={() => setShowSearchModal(false)}
+          onSelectMessage={handleScrollToMessage}
+        />
+      )}
+
+      {showProfileModal && (
+        <ProfileModal onClose={() => setShowProfileModal(false)} />
+      )}
+
+      {showUserProfileModal && (
+        <UserProfileModal
+          userId={showUserProfileModal}
+          onClose={() => setShowUserProfileModal(null)}
+        />
+      )}
+
+      {showGroupInfoModal && currentRoom && (
+        <GroupInfoModal
+          chatRoom={currentRoom}
+          currentUserId={user?.id}
+          onClose={() => setShowGroupInfoModal(false)}
+          onUpdate={fetchRooms}
+          onLeave={() => {
+            setShowGroupInfoModal(false);
+            navigate("/chat");
+            fetchRooms();
+          }}
+        />
+      )}
     </div>
   );
 };

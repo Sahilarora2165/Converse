@@ -26,4 +26,6 @@ public class SendMessageDTO {
      * Used for end-to-end latency calculation.
      */
     private Instant sentAt;
+
+    private Long replyToMessageId;
 }

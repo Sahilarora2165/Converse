@@ -65,4 +65,17 @@ public class Message {
 
     @Column
     private LocalDateTime seenAt;
+
+    @Column(nullable = false)
+    private boolean edited = false;
+
+    @Column
+    private LocalDateTime editedAt;
+
+    @Column(nullable = false)
+    private boolean deleted = false;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "reply_to_id")
+    private Message replyTo;
 }

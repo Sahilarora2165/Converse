@@ -149,12 +149,51 @@ export const WebSocketProvider = ({ children }) => {
     });
   }, [isConnected]);
 
-  const sendMessage = useCallback((roomId, content) => {
+  const subscribeToEdits = useCallback((roomId, callback) => {
+    if (!clientRef.current || !isConnected) return null;
+    return clientRef.current.subscribe(`/topic/chatroom/${roomId}/edits`, (msg) => {
+      callback(JSON.parse(msg.body));
+    });
+  }, [isConnected]);
+
+  const subscribeToDeletes = useCallback((roomId, callback) => {
+    if (!clientRef.current || !isConnected) return null;
+    return clientRef.current.subscribe(`/topic/chatroom/${roomId}/deletes`, (msg) => {
+      callback(JSON.parse(msg.body));
+    });
+  }, [isConnected]);
+
+  const subscribeToGroupUpdates = useCallback((roomId, callback) => {
+    if (!clientRef.current || !isConnected) return null;
+    return clientRef.current.subscribe(`/topic/chatroom/${roomId}/updates`, (msg) => {
+      callback(JSON.parse(msg.body));
+    });
+  }, [isConnected]);
+
+  const sendMessage = useCallback((roomId, content, replyToMessageId = null) => {
     if (!clientRef.current?.connected) return;
     const sentAt = new Date().toISOString();
+    const payload = { content, chatRoomId: roomId, sentAt };
+    if (replyToMessageId) payload.replyToMessageId = replyToMessageId;
     clientRef.current.publish({
       destination: `/app/chat/${roomId}/sendMessage`,
-      body: JSON.stringify({ content, chatRoomId: roomId, sentAt }),
+      body: JSON.stringify(payload),
+    });
+  }, []);
+
+  const sendEdit = useCallback((messageId, newContent) => {
+    if (!clientRef.current?.connected) return;
+    clientRef.current.publish({
+      destination: '/app/chat.edit',
+      body: JSON.stringify({ messageId, newContent }),
+    });
+  }, []);
+
+  const sendDelete = useCallback((messageId) => {
+    if (!clientRef.current?.connected) return;
+    clientRef.current.publish({
+      destination: '/app/chat.delete',
+      body: JSON.stringify({ messageId }),
     });
   }, []);
 
@@ -181,7 +220,12 @@ export const WebSocketProvider = ({ children }) => {
       subscribeToPresence,
       subscribeToDelivery,
       subscribeToSeen,
+      subscribeToEdits,
+      subscribeToDeletes,
+      subscribeToGroupUpdates,
       sendMessage,
+      sendEdit,
+      sendDelete,
       sendDeliveryAck,
       sendSeenAck,
     }}>

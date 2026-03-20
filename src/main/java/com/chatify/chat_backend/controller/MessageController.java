@@ -83,13 +83,45 @@ public class MessageController {
         return ResponseEntity.ok().build();
     }
 
+    @PutMapping("/{id}")
+    public ResponseEntity<MessageDTO> editMessage(
+            @PathVariable Long id,
+            @Valid @RequestBody EditMessageDTO dto,
+            Authentication authentication) {
+        String email = authentication.getName();
+        UserDTO currentUser = userService.getUserByEmail(email);
+        MessageDTO edited = messageService.editMessage(id, currentUser.getId(), dto.getNewContent());
+
+        messagingTemplate.convertAndSend(
+                "/topic/chatroom/" + edited.getChatRoomId() + "/edits", edited);
+
+        return ResponseEntity.ok(edited);
+    }
+
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteMessage(
+    public ResponseEntity<MessageDTO> deleteMessage(
             @PathVariable Long id,
             Authentication authentication) {
         String email = authentication.getName();
         UserDTO currentUser = userService.getUserByEmail(email);
-        messageService.deleteMessage(id, currentUser.getId());
-        return ResponseEntity.noContent().build();
+        MessageDTO deleted = messageService.softDeleteMessage(id, currentUser.getId());
+
+        messagingTemplate.convertAndSend(
+                "/topic/chatroom/" + deleted.getChatRoomId() + "/deletes", deleted);
+
+        return ResponseEntity.ok(deleted);
+    }
+
+    @GetMapping("/search")
+    public ResponseEntity<Page<MessageDTO>> searchMessages(
+            @RequestParam Long chatRoomId,
+            @RequestParam String query,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            Authentication authentication) {
+        String email = authentication.getName();
+        UserDTO currentUser = userService.getUserByEmail(email);
+        return ResponseEntity.ok(
+                messageService.searchMessages(chatRoomId, currentUser.getId(), query, page, size));
     }
 }

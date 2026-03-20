@@ -118,6 +118,27 @@ export const sendMessageAPI = (messageData) => api.post('/messages', messageData
 export const getAllUsers = () => api.get('/users');
 export const markMessagesAsRead = (chatId) => api.put(`/messages/chatroom/${chatId}/read-all`);
 
+// Message Edit & Delete
+export const editMessageAPI = (messageId, newContent) =>
+    api.put(`/messages/${messageId}`, { messageId, newContent });
+export const deleteMessageAPI = (messageId) => api.delete(`/messages/${messageId}`);
+
+// Search Messages
+export const searchMessagesAPI = (chatRoomId, query, page = 0, size = 20) =>
+    api.get(`/messages/search?chatRoomId=${chatRoomId}&query=${encodeURIComponent(query)}&page=${page}&size=${size}`);
+
+// User Profiles
+export const getUserProfile = (userId) => api.get(`/users/${userId}/profile`);
+export const getOwnProfile = () => api.get('/users/me/profile');
+export const updateOwnProfile = (profileData) => api.put('/users/me/profile', profileData);
+
+// Group Chat Management
+export const getGroupInfo = (chatRoomId) => api.get(`/chatrooms/${chatRoomId}/info`);
+export const updateGroupName = (chatRoomId, name) => api.put(`/chatrooms/${chatRoomId}/name`, { name });
+export const removeParticipant = (chatRoomId, userId) => api.delete(`/chatrooms/${chatRoomId}/participants/${userId}`);
+export const leaveGroup = (chatRoomId) => api.post(`/chatrooms/${chatRoomId}/leave`);
+export const transferAdmin = (chatRoomId, newAdminId) => api.post(`/chatrooms/${chatRoomId}/transfer-admin/${newAdminId}`);
+
 // Latency Metrics API
 export const getLatencyMetrics = (windowMinutes = 5) => 
     api.get(`/metrics/latency/current?windowMinutes=${windowMinutes}`);

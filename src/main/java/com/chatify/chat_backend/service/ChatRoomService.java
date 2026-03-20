@@ -337,4 +337,69 @@ public class ChatRoomService {
         return messageRepository.countByChatRoomIdAndIdGreaterThanAndSenderIdNot(
                 chatRoomId, lastReadMessageId, userId);
     }
+
+    @Transactional
+    public ChatRoomDTO updateGroupName(Long roomId, Long requesterId, String newName) {
+        ChatRoom chatRoom = getChatRoomEntity(roomId);
+
+        if (!chatRoom.isGroupChat()) {
+            throw new BadRequestException("Cannot rename a private chat");
+        }
+
+        if (chatRoom.getAdmin() == null || !chatRoom.getAdmin().getId().equals(requesterId)) {
+            throw new UnauthorizedException("Only the admin can rename the group");
+        }
+
+        chatRoom.setName(newName);
+        ChatRoom saved = chatRoomRepository.save(chatRoom);
+        return mapToDTO(saved, chatRoom.getAdmin());
+    }
+
+    @Transactional
+    public void leaveGroup(Long roomId, Long userId) {
+        ChatRoom chatRoom = getChatRoomEntity(roomId);
+
+        if (!chatRoom.isGroupChat()) {
+            throw new BadRequestException("Cannot leave a private chat");
+        }
+
+        User user = userService.getUserEntityById(userId);
+        if (!chatRoom.getParticipants().contains(user)) {
+            throw new BadRequestException("User is not a participant of this group");
+        }
+
+        chatRoom.getParticipants().remove(user);
+
+        // If admin leaves, transfer to first remaining participant
+        if (chatRoom.getAdmin() != null && chatRoom.getAdmin().getId().equals(userId)) {
+            chatRoom.getParticipants().stream().findFirst().ifPresentOrElse(
+                    chatRoom::setAdmin,
+                    () -> chatRoom.setAdmin(null)
+            );
+        }
+
+        chatRoomRepository.save(chatRoom);
+    }
+
+    @Transactional
+    public ChatRoomDTO transferAdmin(Long roomId, Long currentAdminId, Long newAdminId) {
+        ChatRoom chatRoom = getChatRoomEntity(roomId);
+
+        if (!chatRoom.isGroupChat()) {
+            throw new BadRequestException("Cannot transfer admin in a private chat");
+        }
+
+        if (chatRoom.getAdmin() == null || !chatRoom.getAdmin().getId().equals(currentAdminId)) {
+            throw new UnauthorizedException("Only the current admin can transfer admin role");
+        }
+
+        User newAdmin = userService.getUserEntityById(newAdminId);
+        if (!chatRoom.getParticipants().contains(newAdmin)) {
+            throw new BadRequestException("New admin must be a participant of the group");
+        }
+
+        chatRoom.setAdmin(newAdmin);
+        ChatRoom saved = chatRoomRepository.save(chatRoom);
+        return mapToDTO(saved, newAdmin);
+    }
 }

@@ -24,19 +24,19 @@ import java.time.LocalDateTime;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * WebSocket Controller with HYBRID ARCHITECTURE.
+ * WebSocket Controller with PERSISTENCE-FIRST ARCHITECTURE.
  *
  * FLOW:
  * 1. Receive message via WebSocket
- * 2. Generate unique message ID (for idempotency)
- * 3. IMMEDIATELY broadcast to subscribers (real-time, < 30ms)
- * 4. ASYNC publish to Kafka (reliability, with ordering)
+ * 2. PERSIST to database synchronously (ensures durability)
+ * 3. BROADCAST to subscribers with real DB ID
+ * 4. ASYNC publish to Kafka (optional, for analytics/replay)
  *
  * GUARANTEES:
  * - Real-time delivery: < 30ms p50 latency
- * - Message ordering: Per-room via Kafka partitioning
- * - Durability: Kafka persists all messages
- * - No message loss: Kafka retries + DLQ
+ * - Durability: Database persists all messages immediately
+ * - No message loss: Messages saved before broadcast
+ * - Works without Kafka: Graceful degradation when Kafka unavailable
  */
 @Controller
 @PreAuthorize("isAuthenticated()")
@@ -71,13 +71,13 @@ public class ChatWebSocketController {
     /**
      * Primary handler used by the frontend (WebSocketContext.jsx).
      *
-     * HYBRID ARCHITECTURE:
+     * PERSISTENCE-FIRST ARCHITECTURE:
      * 1. Validate and authenticate
-     * 2. Generate unique message ID
-     * 3. IMMEDIATE broadcast via WebSocket (real-time path)
-     * 4. ASYNC publish to Kafka (reliability path)
+     * 2. PERSIST to database synchronously (ensures durability)
+     * 3. BROADCAST via WebSocket with real DB ID
+     * 4. ASYNC publish to Kafka (optional reliability path)
      *
-     * Both paths run in parallel - neither blocks the other.
+     * This ensures messages are never lost even if Kafka is unavailable.
      */
     @MessageMapping("/chat/{roomId}/sendMessage")
     public void sendMessage(
@@ -102,54 +102,49 @@ public class ChatWebSocketController {
             return;
         }
 
-        // 2. Generate unique message ID for idempotency
-        String messageId = ChatMessageEvent.generateMessageId();
-
-        // 3. Record latency (from client send time to server receive time)
+        // 2. Record latency (from client send time to server receive time)
         if (sendMessageDTO.getSentAt() != null) {
             long latencyMs = Duration.between(sendMessageDTO.getSentAt(), serverReceivedAt).toMillis();
             latencyMetricsService.recordLatency(latencyMs);
         }
 
-        // 4. Create the event for both paths
-        ChatMessageEvent event = ChatMessageEvent.builder()
-                .messageId(messageId)
-                .chatRoomId(roomId)
-                .senderId(user.getId())
-                .senderUsername(user.getUsername())
-                .content(sendMessageDTO.getContent())
-                .messageType(sendMessageDTO.getMessageType())
-                .fileUrl(sendMessageDTO.getFileUrl())
-                .fileName(sendMessageDTO.getFileName())
-                .sentAt(sendMessageDTO.getSentAt())
-                .serverReceivedAt(serverReceivedAt)
-                .retryCount(0)
-                .build();
+        // 3. PERSIST TO DATABASE FIRST - This ensures messages are never lost
+        MessageDTO savedMessage = messageService.sendMessage(sendMessageDTO, user.getId());
 
-        // 5. IMMEDIATE BROADCAST - Real-time path (< 30ms)
-        // This happens FIRST and does NOT wait for anything
-        MessageDTO broadcastMessage = createBroadcastMessage(event);
-        messagingTemplate.convertAndSend("/topic/chatroom/" + roomId, broadcastMessage);
+        // 4. BROADCAST with real DB ID - All clients receive the persisted message
+        messagingTemplate.convertAndSend("/topic/chatroom/" + roomId, savedMessage);
 
-        // 6. ASYNC KAFKA PUBLISH - Reliability path
-        // Non-blocking, ensures durability and ordering
+        // 5. ASYNC KAFKA PUBLISH - Optional reliability path for analytics/replay
         CompletableFuture.runAsync(() -> {
             try {
+                ChatMessageEvent event = ChatMessageEvent.builder()
+                        .messageId(savedMessage.getId().toString())
+                        .chatRoomId(roomId)
+                        .senderId(user.getId())
+                        .senderUsername(user.getUsername())
+                        .content(sendMessageDTO.getContent())
+                        .messageType(sendMessageDTO.getMessageType())
+                        .fileUrl(sendMessageDTO.getFileUrl())
+                        .fileName(sendMessageDTO.getFileName())
+                        .sentAt(sendMessageDTO.getSentAt())
+                        .serverReceivedAt(serverReceivedAt)
+                        .replyToMessageId(sendMessageDTO.getReplyToMessageId())
+                        .retryCount(0)
+                        .build();
                 kafkaProducerService.publishChatMessage(event);
             } catch (Exception e) {
-                log.error("Failed to publish message {} to Kafka for room={}: {}",
-                        messageId, roomId, e.getMessage());
-                // Note: Message already delivered via WebSocket
-                // Kafka failure = no persistence, but delivery succeeded
+                log.debug("Kafka publish skipped for message {} (Kafka may be unavailable): {}",
+                        savedMessage.getId(), e.getMessage());
+                // Message already persisted and delivered - Kafka is optional
             }
         });
 
         long elapsedMs = (System.nanoTime() - startTime) / 1_000_000;
-        log.debug("Message {} processed in {}ms for room={}", messageId, elapsedMs, roomId);
+        log.debug("Message {} persisted and broadcast in {}ms for room={}", savedMessage.getId(), elapsedMs, roomId);
     }
 
     /**
-     * Legacy handler - uses same hybrid architecture.
+     * Legacy handler - uses persistence-first architecture.
      */
     @MessageMapping("/chat.sendMessage")
     public void sendMessage(@Payload SendMessageDTO messageDTO, Principal principal) {
@@ -163,7 +158,6 @@ public class ChatWebSocketController {
             return;
         }
 
-        String messageId = ChatMessageEvent.generateMessageId();
         Instant serverReceivedAt = Instant.now();
 
         if (messageDTO.getSentAt() != null) {
@@ -171,52 +165,62 @@ public class ChatWebSocketController {
             latencyMetricsService.recordLatency(latencyMs);
         }
 
-        ChatMessageEvent event = ChatMessageEvent.builder()
-                .messageId(messageId)
-                .chatRoomId(messageDTO.getChatRoomId())
-                .senderId(sender.getId())
-                .senderUsername(sender.getUsername())
-                .content(messageDTO.getContent())
-                .messageType(messageDTO.getMessageType())
-                .fileUrl(messageDTO.getFileUrl())
-                .fileName(messageDTO.getFileName())
-                .sentAt(messageDTO.getSentAt())
-                .serverReceivedAt(serverReceivedAt)
-                .retryCount(0)
-                .build();
+        // Persist to database first
+        MessageDTO savedMessage = messageService.sendMessage(messageDTO, sender.getId());
 
-        // Immediate broadcast
-        MessageDTO broadcastMessage = createBroadcastMessage(event);
-        messagingTemplate.convertAndSend("/topic/chatroom/" + messageDTO.getChatRoomId(), broadcastMessage);
+        // Broadcast with real DB ID
+        messagingTemplate.convertAndSend("/topic/chatroom/" + messageDTO.getChatRoomId(), savedMessage);
 
-        // Async Kafka publish
+        // Async Kafka publish (optional)
+        Long roomId = messageDTO.getChatRoomId();
         CompletableFuture.runAsync(() -> {
             try {
+                ChatMessageEvent event = ChatMessageEvent.builder()
+                        .messageId(savedMessage.getId().toString())
+                        .chatRoomId(roomId)
+                        .senderId(sender.getId())
+                        .senderUsername(sender.getUsername())
+                        .content(messageDTO.getContent())
+                        .messageType(messageDTO.getMessageType())
+                        .fileUrl(messageDTO.getFileUrl())
+                        .fileName(messageDTO.getFileName())
+                        .sentAt(messageDTO.getSentAt())
+                        .serverReceivedAt(serverReceivedAt)
+                        .replyToMessageId(messageDTO.getReplyToMessageId())
+                        .retryCount(0)
+                        .build();
                 kafkaProducerService.publishChatMessage(event);
             } catch (Exception e) {
-                log.error("Failed to publish message {} to Kafka: {}", messageId, e.getMessage());
+                log.debug("Kafka publish skipped (Kafka may be unavailable): {}", e.getMessage());
             }
         });
     }
 
-    /**
-     * Creates a MessageDTO for immediate WebSocket broadcast.
-     * Uses the messageId for correlation with persisted message.
-     */
-    private MessageDTO createBroadcastMessage(ChatMessageEvent event) {
-        return new MessageDTO(
-                (long) -Math.abs(event.getMessageId().hashCode()), // Temporary ID (hash of messageId)
-                event.getContent() != null ? event.getContent() : "",
-                event.getMessageType(),
-                event.getFileUrl(),
-                event.getFileName(),
-                event.getSenderId(),
-                event.getSenderUsername(),
-                event.getChatRoomId(),
-                LocalDateTime.now(),
-                java.util.Set.of(),
-                com.chatify.chat_backend.entity.enums.MessageStatus.SENT
-        );
+    @MessageMapping("/chat.edit")
+    public void handleEditMessage(@Payload EditMessageDTO editDTO, Principal principal) {
+        if (principal == null) return;
+
+        String email = principal.getName();
+        User user = userService.getUserEntityByEmail(email);
+
+        MessageDTO edited = messageService.editMessage(editDTO.getMessageId(), user.getId(), editDTO.getNewContent());
+        messagingTemplate.convertAndSend(
+                "/topic/chatroom/" + edited.getChatRoomId() + "/edits", edited);
+    }
+
+    @MessageMapping("/chat.delete")
+    public void handleDeleteMessage(@Payload java.util.Map<String, Long> payload, Principal principal) {
+        if (principal == null) return;
+
+        String email = principal.getName();
+        User user = userService.getUserEntityByEmail(email);
+
+        Long messageId = payload.get("messageId");
+        if (messageId == null) return;
+
+        MessageDTO deleted = messageService.softDeleteMessage(messageId, user.getId());
+        messagingTemplate.convertAndSend(
+                "/topic/chatroom/" + deleted.getChatRoomId() + "/deletes", deleted);
     }
 
     @MessageMapping("/chat.read/{messageId}")

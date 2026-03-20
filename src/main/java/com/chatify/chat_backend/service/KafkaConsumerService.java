@@ -103,7 +103,8 @@ public class KafkaConsumerService {
                     event.getMessageType(),
                     event.getFileUrl(),
                     event.getFileName(),
-                    event.getSentAt()
+                    event.getSentAt(),
+                    event.getReplyToMessageId()
             );
 
             // Persist to database

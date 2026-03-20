@@ -29,4 +29,14 @@ public class MessageDTO {
     private Set<Long> readByUserIds;
 
     private MessageStatus status;
+
+    private boolean edited;
+    private LocalDateTime editedAt;
+    private boolean deleted;
+
+    // Reply fields
+    private Long replyToId;
+    private String replyToContent;
+    private String replyToSenderName;
+    private MessageType replyToMessageType;
 }

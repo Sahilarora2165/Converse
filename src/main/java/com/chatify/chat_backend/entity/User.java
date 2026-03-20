@@ -40,6 +40,12 @@ public class User {
     @Column(name = "provider_id")
     private String providerId; // Google's "sub" field
 
+    @Column(length = 500)
+    private String bio;
+
+    @Column(name = "display_name")
+    private String displayName;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private UserStatus status = UserStatus.OFFLINE;

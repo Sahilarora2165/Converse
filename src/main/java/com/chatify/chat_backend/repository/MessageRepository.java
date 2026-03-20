@@ -108,4 +108,7 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
     List<UnreadCountDTO> findUnreadCountsForRooms(
             @Param("userId") Long userId,
             @Param("chatRoomIds") List<Long> chatRoomIds);
+
+    @Query("SELECT m FROM Message m WHERE m.chatRoom.id = :chatRoomId AND m.deleted = false AND LOWER(m.content) LIKE LOWER(CONCAT('%', :query, '%')) ORDER BY m.timestamp DESC")
+    Page<Message> searchMessages(@Param("chatRoomId") Long chatRoomId, @Param("query") String query, Pageable pageable);
 }

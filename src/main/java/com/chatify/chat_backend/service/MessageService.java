@@ -71,6 +71,12 @@ public class MessageService {
         message.setSender(sender);
         message.setChatRoom(chatRoom);
 
+        if (dto.getReplyToMessageId() != null) {
+            Message replyTo = messageRepository.findById(dto.getReplyToMessageId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Message", dto.getReplyToMessageId()));
+            message.setReplyTo(replyTo);
+        }
+
         message.setStatus(MessageStatus.SENT);
 
         Message savedMessage = messageRepository.save(message);
@@ -179,6 +185,43 @@ public class MessageService {
     }
 
     @Transactional
+    public MessageDTO editMessage(Long messageId, Long userId, String newContent) {
+        Message message = messageRepository.findById(messageId)
+                .orElseThrow(() -> new ResourceNotFoundException("Message", messageId));
+
+        if (!message.getSender().getId().equals(userId)) {
+            throw new UnauthorizedException("Only the sender can edit this message");
+        }
+
+        if (message.isDeleted()) {
+            throw new BadRequestException("Cannot edit a deleted message");
+        }
+
+        message.setContent(newContent);
+        message.setEdited(true);
+        message.setEditedAt(LocalDateTime.now());
+
+        Message saved = messageRepository.save(message);
+        return mapToDTO(saved);
+    }
+
+    @Transactional
+    public MessageDTO softDeleteMessage(Long messageId, Long userId) {
+        Message message = messageRepository.findById(messageId)
+                .orElseThrow(() -> new ResourceNotFoundException("Message", messageId));
+
+        if (!message.getSender().getId().equals(userId)) {
+            throw new UnauthorizedException("Only the sender can delete this message");
+        }
+
+        message.setDeleted(true);
+        message.setContent("");
+
+        Message saved = messageRepository.save(message);
+        return mapToDTO(saved);
+    }
+
+    @Transactional
     public void deleteMessage(Long messageId, Long userId) {
         Message message = messageRepository.findById(messageId)
                 .orElseThrow(() -> new ResourceNotFoundException("Message", messageId));
@@ -188,6 +231,22 @@ public class MessageService {
         }
 
         messageRepository.delete(message);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<MessageDTO> searchMessages(Long chatRoomId, Long userId, String query, int page, int size) {
+        User user = userService.getUserEntityById(userId);
+
+        ChatRoom chatRoom = chatRoomRepository.findById(chatRoomId)
+                .orElseThrow(() -> new ResourceNotFoundException("ChatRoom", chatRoomId));
+
+        if (!chatRoom.getParticipants().contains(user)) {
+            throw new UnauthorizedException("User is not a participant of this chat room");
+        }
+
+        Pageable pageable = PageRequest.of(page, size);
+        return messageRepository.searchMessages(chatRoomId, query, pageable)
+                .map(this::mapToDTO);
     }
 
     @Transactional
@@ -269,18 +328,30 @@ public class MessageService {
     }
 
     public MessageDTO mapToDTO(Message message) {
-        return new MessageDTO(
-                message.getId(),
-                message.getContent(),
-                message.getMessageType(),
-                message.getFileUrl(),
-                message.getFileName(),
-                message.getSender().getId(),
-                message.getSender().getUsername(),
-                message.getChatRoom().getId(),
-                message.getTimestamp(),
-                message.getReadBy().stream().map(User::getId).collect(Collectors.toSet()),
-                message.getStatus()
-        );
+        MessageDTO dto = new MessageDTO();
+        dto.setId(message.getId());
+        dto.setContent(message.isDeleted() ? "This message was deleted" : message.getContent());
+        dto.setMessageType(message.getMessageType());
+        dto.setFileUrl(message.isDeleted() ? null : message.getFileUrl());
+        dto.setFileName(message.isDeleted() ? null : message.getFileName());
+        dto.setSenderId(message.getSender().getId());
+        dto.setSenderUsername(message.getSender().getUsername());
+        dto.setChatRoomId(message.getChatRoom().getId());
+        dto.setTimestamp(message.getTimestamp());
+        dto.setReadByUserIds(message.getReadBy().stream().map(User::getId).collect(Collectors.toSet()));
+        dto.setStatus(message.getStatus());
+        dto.setEdited(message.isEdited());
+        dto.setEditedAt(message.getEditedAt());
+        dto.setDeleted(message.isDeleted());
+
+        if (message.getReplyTo() != null) {
+            Message reply = message.getReplyTo();
+            dto.setReplyToId(reply.getId());
+            dto.setReplyToContent(reply.isDeleted() ? "This message was deleted" : reply.getContent());
+            dto.setReplyToSenderName(reply.getSender().getUsername());
+            dto.setReplyToMessageType(reply.getMessageType());
+        }
+
+        return dto;
     }
 }

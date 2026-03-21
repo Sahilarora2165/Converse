@@ -1,4 +1,4 @@
-# Chatify — Distributed Real-Time Messaging Platform
+# Converse — Distributed Real-Time Messaging Platform
 
 Chatify is a **full-stack real-time messaging platform** built with **Spring Boot (backend)** and **React + Vite (frontend)**.
 
